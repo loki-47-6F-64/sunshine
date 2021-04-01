@@ -304,14 +304,14 @@ static encoder_t nvenc {
 static encoder_t amdvce {
   "amdvce"sv,
   { (int)amd::profile_h264_e::high, (int)amd::profile_hevc_e::main },
-  //AV_HWDEVICE_TYPE_D3D11VA,
-  //AV_PIX_FMT_NONE,
-  //AV_PIX_FMT_YUV420P,
   AV_HWDEVICE_TYPE_D3D11VA,
   AV_PIX_FMT_D3D11,
   AV_PIX_FMT_NV12, AV_PIX_FMT_YUV420P,
   {
     {
+      { "header_insertion_mode"s, "idr"s },
+      { "gops_per_idr"s, 30 },
+      { "usage"s, "ultralowlatency"s },
       { "quality"s, &config::video.amd.quality },
       { "rc"s, &config::video.amd.rc }
     },
@@ -320,6 +320,7 @@ static encoder_t amdvce {
   },
   {
     {
+      { "usage"s, "ultralowlatency"s },
       { "quality"s, &config::video.amd.quality },
       { "rc"s, &config::video.amd.rc }
     },
