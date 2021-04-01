@@ -315,14 +315,15 @@ static encoder_t amdvce {
       { "quality"s, &config::video.amd.quality },
       { "rc"s, &config::video.amd.rc }
     },
-    std::nullopt, std::nullopt,
+    std::nullopt, std::make_optional<encoder_t::option_t>({"qp"s, &config::video.qp}),
     "hevc_amf"s,
   },
   {
     {
       { "usage"s, "ultralowlatency"s },
       { "quality"s, &config::video.amd.quality },
-      { "rc"s, &config::video.amd.rc }
+      { "rc"s, &config::video.amd.rc },
+      {"log_to_dbg"s,"1"s},
     },
     std::nullopt, std::make_optional<encoder_t::option_t>({"qp"s, &config::video.qp}),
     "h264_amf"s
@@ -770,7 +771,7 @@ void encode_run(
 
     if(idr_events->peek()) {
       session->frame->pict_type = AV_PICTURE_TYPE_I;
-
+      session->frame->key_frame = 1;
       auto event = idr_events->pop();
       if(!event) {
         return;
@@ -782,6 +783,7 @@ void encode_run(
     }
     else if(frame_nr == key_frame_nr) {
       session->frame->pict_type = AV_PICTURE_TYPE_I;
+      session->frame->key_frame = 1;
     }
 
     std::this_thread::sleep_until(next_frame);
@@ -808,6 +810,7 @@ void encode_run(
     }
 
     session->frame->pict_type = AV_PICTURE_TYPE_NONE;
+    //session->frame->key_frame = 0;
   }
 }
 
@@ -920,6 +923,7 @@ encode_e encode_run_sync(std::vector<std::unique_ptr<sync_session_ctx_t>> &synce
 
       if(ctx->idr_events->peek()) {
         pos->session.frame->pict_type = AV_PICTURE_TYPE_I;
+        pos->session.frame->key_frame = 1;
 
         auto event = ctx->idr_events->pop();
         auto end = event->second;
@@ -929,6 +933,7 @@ encode_e encode_run_sync(std::vector<std::unique_ptr<sync_session_ctx_t>> &synce
       }
       else if(ctx->frame_nr == ctx->key_frame_nr) {
         pos->session.frame->pict_type = AV_PICTURE_TYPE_I;
+        pos->session.frame->key_frame = 1;
       }
 
       if(img_tmp) {
@@ -967,7 +972,7 @@ encode_e encode_run_sync(std::vector<std::unique_ptr<sync_session_ctx_t>> &synce
       }
 
       pos->session.frame->pict_type = AV_PICTURE_TYPE_NONE;
-
+      pos->session.frame->key_frame = 0;
       ++pos;
     })
 
