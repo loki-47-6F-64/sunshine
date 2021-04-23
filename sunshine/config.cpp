@@ -88,18 +88,16 @@ int coder_from_view(const std::string_view &coder) {
 namespace amd {
 enum quality_e : int {
   _default = 0,
-  speed,
-  balanced,
-  //quality2,
+  speed = 10,
+  balanced = 5,
+  best = 0,
 };
 
 enum rc_e : int {
-  constqp   = 0x0,       /**< Constant QP mode */
-  vbr       = 0x1,       /**< Variable bitrate mode */
-  cbr       = 0x2,       /**< Constant bitrate mode */
-  cbr_ld_hq = 0x8,       /**< low-delay CBR, high quality */
-  cbr_hq    = 0x10,      /**< CBR, high quality (slower) */
-  vbr_hq    = 0x20       /**< VBR, high quality (slower) */
+  cqp         = 0,       /**< Peak Contrained Variable Bitrate */
+  vbr_peak    = 2,       /**< Variable bitrate mode */
+  cbr         = 3,       /**< Peak Contrained Variable Bitrate */
+  vbr_latency = 1,       /**< Latency Constrained Variable Bitrate */
 };
 
 enum coder_e : int {
@@ -112,7 +110,7 @@ std::optional<quality_e> quality_from_view(const std::string_view &quality) {
 #define _CONVERT_(x) if(quality == #x##sv) return x
   _CONVERT_(speed);
   _CONVERT_(balanced);
-  //_CONVERT_(quality2);
+  _CONVERT_(best);
   if(quality == "default"sv) return _default;
 #undef _CONVERT_
   return std::nullopt;
@@ -120,12 +118,10 @@ std::optional<quality_e> quality_from_view(const std::string_view &quality) {
 
 std::optional<rc_e> rc_from_view(const std::string_view &rc) {
 #define _CONVERT_(x) if(rc == #x##sv) return x
-  _CONVERT_(constqp);
-  _CONVERT_(vbr);
+  _CONVERT_(cqp);
+  _CONVERT_(vbr_peak);
   _CONVERT_(cbr);
-  _CONVERT_(cbr_hq);
-  _CONVERT_(vbr_hq);
-  _CONVERT_(cbr_ld_hq);
+  _CONVERT_(vbr_latency);
 #undef _CONVERT_
   return std::nullopt;
 }
