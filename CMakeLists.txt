@@ -21,13 +21,15 @@ if(WIN32)
 	option(SUNSHINE_STANDALONE "Compile stand-alone binary of Sunshine" OFF)
 	#Prebuilt binaries can be found on GitHub releases
 	if(SUNSHINE_STANDALONE)
-		set(SUNSHINE_PREBUILT_VERSION "1.0.0")
-		set(SUNSHINE_PREBUILT_HASH "5d59986bd7f619eaaf82b2dd56b5127b747c9cbe8db61e3b898ff6b485298ed6")
-		download_file("https://github.com/TheElixZammuto/sunshine-prebuilt/releases/download/${SUNSHINE_PREBUILT_VERSION}/pre-compiled.zip" 
-		./pre-compiled-${SUNSHINE_PREBUILT_VERSION}.zip 
-		SHA256 ${SUNSHINE_PREBUILT_HASH})
-		file(REMOVE_RECURSE "${CMAKE_CURRENT_SOURCE_DIR}/pre-compiled")
-		file(ARCHIVE_EXTRACT INPUT ./pre-compiled-${SUNSHINE_PREBUILT_VERSION}.zip DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/pre-compiled")
+		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pre-compiled/windows")
+			message(INFO " Downloading Windows Prebuilts")
+			set(SUNSHINE_PREBUILT_VERSION "1.0.0")
+			set(SUNSHINE_PREBUILT_HASH "5d59986bd7f619eaaf82b2dd56b5127b747c9cbe8db61e3b898ff6b485298ed6")
+			download_file("https://github.com/TheElixZammuto/sunshine-prebuilt/releases/download/${SUNSHINE_PREBUILT_VERSION}/pre-compiled.zip" 
+				./pre-compiled-${SUNSHINE_PREBUILT_VERSION}.zip 
+				SHA256 ${SUNSHINE_PREBUILT_HASH})
+			file(ARCHIVE_EXTRACT INPUT ./pre-compiled-${SUNSHINE_PREBUILT_VERSION}.zip DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/pre-compiled")
+		endif()
 		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
 	
 		if(NOT DEFINED SUNSHINE_PREPARED_BINARIES)
