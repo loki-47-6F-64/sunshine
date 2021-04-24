@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
   }
 
   if(config::sunshine.min_log_level >= 2) {
-    av_log_set_level(AV_LOG_QUIET);
+    av_log_set_level(AV_LOG_WARNING);
   }
 
   sink = boost::make_shared<text_sink>();
