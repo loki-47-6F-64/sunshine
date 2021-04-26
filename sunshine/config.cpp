@@ -86,20 +86,29 @@ int coder_from_view(const std::string_view &coder) {
 }
 
 namespace amd {
-enum quality_e : int {
+// enum class quality_h264_e : int {
+//   _default = 0,
+//   balanced = 5,
+//   speed = 10,
+// };
+
+// enum class quality_hevc_e : int {
+//   _default = 2,
+//   balanced = 0,
+//   speed = 1,
+// };
+
+enum  quality_e : int {
   _default = 0,
-  speed,
   balanced,
-  //quality2,
+  speed,
 };
 
 enum rc_e : int {
-  constqp   = 0x0,       /**< Constant QP mode */
-  vbr       = 0x1,       /**< Variable bitrate mode */
-  cbr       = 0x2,       /**< Constant bitrate mode */
-  cbr_ld_hq = 0x8,       /**< low-delay CBR, high quality */
-  cbr_hq    = 0x10,      /**< CBR, high quality (slower) */
-  vbr_hq    = 0x20       /**< VBR, high quality (slower) */
+  cqp         = 0,       /**< Peak Contrained Variable Bitrate */
+  vbr_peak    = 2,       /**< Variable bitrate mode */
+  cbr         = 3,       /**< Peak Contrained Variable Bitrate */
+  vbr_latency = 1,       /**< Latency Constrained Variable Bitrate */
 };
 
 enum coder_e : int {
@@ -108,11 +117,30 @@ enum coder_e : int {
   cavlc
 };
 
+// std::optional<quality_h264_e> quality_from_view_h264(const std::string_view &quality_h264) {
+// #define _CONVERT_(x) if(quality == #x##sv) return x
+//   _CONVERT_(speed);
+//   _CONVERT_(balanced);
+//   // _CONVERT_(best);
+//   if(quality == "default"sv) return _default;
+// #undef _CONVERT_
+//   return std::nullopt;
+// }
+
+// std::optional<quality_hevc_e> quality_from_view_hevc(const std::string_view &quality_hevc) {
+// #define _CONVERT_(x) if(quality == #x##sv) return x
+//   _CONVERT_(speed);
+//   _CONVERT_(balanced);
+//   // _CONVERT_(best);
+//   if(quality == "default"sv) return _default;
+// #undef _CONVERT_
+//   return std::nullopt;
+// }
+
 std::optional<quality_e> quality_from_view(const std::string_view &quality) {
 #define _CONVERT_(x) if(quality == #x##sv) return x
   _CONVERT_(speed);
   _CONVERT_(balanced);
-  //_CONVERT_(quality2);
   if(quality == "default"sv) return _default;
 #undef _CONVERT_
   return std::nullopt;
@@ -120,12 +148,10 @@ std::optional<quality_e> quality_from_view(const std::string_view &quality) {
 
 std::optional<rc_e> rc_from_view(const std::string_view &rc) {
 #define _CONVERT_(x) if(rc == #x##sv) return x
-  _CONVERT_(constqp);
-  _CONVERT_(vbr);
+  _CONVERT_(cqp);
+  _CONVERT_(vbr_peak);
   _CONVERT_(cbr);
-  _CONVERT_(cbr_hq);
-  _CONVERT_(vbr_hq);
-  _CONVERT_(cbr_ld_hq);
+  _CONVERT_(vbr_latency);
 #undef _CONVERT_
   return std::nullopt;
 }
@@ -423,6 +449,8 @@ void apply_config(std::unordered_map<std::string, std::string> &&vars) {
   int_f(vars, "nv_rc", video.nv.rc, nv::rc_from_view);
   int_f(vars, "nv_coder", video.nv.coder, nv::coder_from_view);
 
+  // int_f(vars, "amd_quality", video.amd.quality_h264, amd::quality_from_view_h264);
+  // int_f(vars, "amd_quality", video.amd.quality_hevc, amd::quality_from_view_hevc);
   int_f(vars, "amd_quality", video.amd.quality, amd::quality_from_view);
   int_f(vars, "amd_rc", video.amd.rc, amd::rc_from_view);
   int_f(vars, "amd_coder", video.amd.coder, amd::coder_from_view);

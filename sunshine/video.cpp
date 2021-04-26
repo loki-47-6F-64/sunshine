@@ -61,14 +61,15 @@ enum class profile_hevc_e : int {
 namespace amd {
 
 enum class profile_h264_e : int {
-  main,
-  high,
-  constrained_baseline,
-  constrained_high,
+  main = 77,
+  high = 100,
+  constrained_baseline = 256,
+  constrained_high = 257,
 };
 
-enum class profile_hevc_e : int {
+enum class profile_tier_hevc_e : int {
   main,
+  high,
 };
 }
 
@@ -303,7 +304,7 @@ static encoder_t nvenc {
 
 static encoder_t amdvce {
   "amdvce"sv,
-  { (int)amd::profile_h264_e::high, (int)amd::profile_hevc_e::main },
+  { (int)amd::profile_h264_e::high, (int)amd::profile_tier_hevc_e::high },
   AV_HWDEVICE_TYPE_D3D11VA,
   AV_PIX_FMT_D3D11,
   AV_PIX_FMT_NV12, AV_PIX_FMT_YUV420P,
@@ -373,11 +374,9 @@ static encoder_t software {
 static std::vector<encoder_t> encoders {
 #ifdef _WIN32
   nvenc,
+  amdvce,  
 #endif
   software,
-#ifdef _WIN32
-  amdvce,
-#endif
 };
 
 void reset_display(std::shared_ptr<platf::display_t> &disp, AVHWDeviceType type) {
