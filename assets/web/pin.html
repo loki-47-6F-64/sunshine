@@ -1,31 +1,64 @@
-
-<div id="content" class="container">
-    <h1 class="my-4">PIN Pairing</h1>
-    <form action="" class="form d-flex flex-column align-items-center" id="form">
-        <div class="card flex-column d-flex p-4 mb-4">
-            <input type="number" placeholder="PIN" id="pin-input" class="form-control my-4">
-            <button class="btn btn-primary">Send</button>
+<main role="main">
+  <div class="container-parent bg-light">
+    <div class="container py-3">
+      <h1>Pair a new device</h1>
+      <p class="mb-0">Allow a new client to connect to this computer by entering the PIN code given by Moonlight here.
+      </p>
+    </div>
+  </div>
+  <div class="container-parent">
+    <div class="container py-3">
+      <div class="row justify-content-center">
+        <div class="col-md-6">
+          <div class="alert alert-warning" role="alert">
+            <strong>Warning!</strong> Make sure you have access to the client you are pairing with.<br /> This software
+            can give total control to your computer, so be careful!
+          </div>
+          <form action="#" id="form">
+            <div class="mb-3">
+              <label for="input" class="form-label">PIN code</label>
+              <input type="text" class="form-control form-control-lg" id="input" name="pin" placeholder="1234"
+                minlength="4" maxlength="4" required />
+              <div class="valid-feedback">Pairing successful! Please check Moonlight to continue!</div>
+              <div class="invalid-feedback">The given PIN code doesn't match, please check that it's typed correctly.
+              </div>
+            </div>
+            <button type="submit" id="submit" class="btn w-100 btn-primary">Pair new device</button>
+          </form>
         </div>
-        <div class="alert alert-warning">
-            <b>Warning!</b> Make sure you have access to the client you are pairing with.<br>
-            This software can give total control to your computer, so be careful!
-        </div>
-        <div id="status"></div>
-    </form>
-</div>
+      </div>
+    </div>
+  </div>
+</main>
 
 <script>
-    document.querySelector("#form").addEventListener("submit", (e) => {
-        e.preventDefault();
-        let pin = document.querySelector("#pin-input").value;
-        document.querySelector("#status").innerHTML = "";
-        let b = JSON.stringify({pin: pin});
-        fetch("/api/pin",{method: "POST",body: b}).then((response) => response.json()).then((response)=>{
-            if(response.status){
-                document.querySelector("#status").innerHTML = `<div class="alert alert-success" role="alert">Success! Please check Moonlight to continue</div>`;
-            } else {
-                document.querySelector("#status").innerHTML = `<div class="alert alert-danger" role="alert">PIN does not match, please check if it's typed correctly</div>`;
-            }
-        })
-    })
+  /** @type HTMLFormElement */
+  const formElement = document.querySelector("form#form");
+  /** @type HTMLInputElement */
+  const input = formElement.querySelector("input#input");
+  /** @type HTMLButtonElement */
+  const submit = formElement.querySelector("button#submit");
+
+  formElement.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    // TODO: Check for empty or null values
+    const body = JSON.stringify({ pin: input.value });
+    fetch("/api/pin", { method: "POST", body })
+      .then((response) => response.json())
+      .then((response) => {
+        submit.disabled = false;
+        if (response.status === "true") {
+          input.classList.add("is-valid");
+          input.classList.remove("is-invalid");
+        } else {
+          input.classList.add("is-invalid");
+          input.classList.remove("is-valid");
+        }
+      })
+      .catch((err) => {
+        submit.disabled = false;
+        console.error(err);
+      });
+  });
 </script>
