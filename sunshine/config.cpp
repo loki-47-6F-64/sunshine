@@ -185,7 +185,9 @@ stream_t stream {
 };
 
 nvhttp_t nvhttp {
-  "lan", // origin_pin
+  "pc",  // origin_pin
+  "lan", // origin web manager
+
   PRIVATE_KEY_FILE,
   CERTIFICATE_FILE,
 
@@ -222,7 +224,8 @@ sunshine_t sunshine {
   {},                                   // Password
   {},                                   // Password Salt
   SUNSHINE_ASSETS_DIR "/sunshine.conf", // config file
-  {}                                    // cmd args
+  {},                                   // cmd args
+  47989,
 };
 
 bool endline(char ch) {
@@ -446,9 +449,12 @@ bool to_bool(std::string &boolean) {
   return boolean == "true"sv ||
          boolean == "yes"sv ||
          boolean == "enable"sv ||
+         boolean == "enabled"sv ||
+         boolean == "on"sv ||
          (std::find(std::begin(boolean), std::end(boolean), '1') != std::end(boolean));
 }
-void bool_f(std::unordered_map<std::string, std::string> &vars, const std::string &name, int &input) {
+
+void bool_f(std::unordered_map<std::string, std::string> &vars, const std::string &name, bool &input) {
   std::string tmp;
   string_f(vars, name, tmp);
 
@@ -456,7 +462,7 @@ void bool_f(std::unordered_map<std::string, std::string> &vars, const std::strin
     return;
   }
 
-  input = to_bool(tmp) ? 1 : 0;
+  input = to_bool(tmp);
 }
 
 void double_f(std::unordered_map<std::string, std::string> &vars, const std::string &name, double &input) {
@@ -553,7 +559,7 @@ int apply_flags(const char *line) {
       config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE].flip();
       break;
     case 'p':
-      config::sunshine.flags[config::flag::CONST_PIN].flip();
+      config::sunshine.flags[config::flag::UPNP].flip();
       break;
     default:
       std::cout << "Warning: Unrecognized flag: ["sv << *line << ']' << std::endl;
@@ -607,6 +613,7 @@ void apply_config(std::unordered_map<std::string, std::string> &&vars) {
   string_f(vars, "virtual_sink", audio.virtual_sink);
 
   string_restricted_f(vars, "origin_pin_allowed", nvhttp.origin_pin_allowed, { "pc"sv, "lan"sv, "wan"sv });
+  string_restricted_f(vars, "origin_web_ui_allowed", nvhttp.origin_web_ui_allowed, { "pc"sv, "lan"sv, "wan"sv });
 
   int to = -1;
   int_between_f(vars, "ping_timeout", to, { -1, std::numeric_limits<int>::max() });
@@ -637,6 +644,17 @@ void apply_config(std::unordered_map<std::string, std::string> &&vars) {
   int_f(vars, "key_repeat_delay", to);
   if(to >= 0) {
     input.key_repeat_delay = std::chrono::milliseconds { to };
+  }
+
+  int port = sunshine.port;
+  int_f(vars, "port"s, port);
+  sunshine.port = (std::uint16_t)port;
+
+  bool upnp = false;
+  bool_f(vars, "upnp"s, upnp);
+
+  if(upnp) {
+    config::sunshine.flags[config::flag::UPNP].flip();
   }
 
   std::string log_level_string;

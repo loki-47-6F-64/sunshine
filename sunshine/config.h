@@ -59,6 +59,7 @@ struct nvhttp_t {
   // Could be any of the following values:
   // pc|lan|wan
   std::string origin_pin_allowed;
+  std::string origin_web_ui_allowed;
 
   std::string pkey; // must be 2048 bits
   std::string cert; // must be signed with a key of 2048 bits
@@ -83,6 +84,7 @@ enum flag_e : std::size_t {
   PIN_STDIN = 0,              // Read PIN from stdin instead of http
   FRESH_STATE,                // Do not load or save state
   FORCE_VIDEO_HEADER_REPLACE, // force replacing headers inside video data
+  UPNP,                       // Try Universal Plug 'n Play
   CONST_PIN,                  // Use "universal" pin
   FLAG_SIZE
 };
@@ -104,6 +106,8 @@ struct sunshine_t {
     int argc;
     char **argv;
   } cmd;
+
+  std::uint16_t port;
 };
 
 extern video_t video;

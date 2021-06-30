@@ -23,6 +23,7 @@
 #include "nvhttp.h"
 #include "rtsp.h"
 #include "thread_pool.h"
+#include "upnp.h"
 #include "video.h"
 
 #include "platform/common.h"
@@ -60,14 +61,16 @@ void print_help(const char *name) {
     << "Usage: "sv << name << " [options] [/path/to/configuration_file] [--cmd]"sv << std::endl
     << "    Any configurable option can be overwritten with: \"name=value\""sv << std::endl
     << std::endl
-    << "    --help | print help"sv << std::endl
+    << "    --help                    | print help"sv << std::endl
     << "    --creds username password | set user credentials for the Web manager" << std::endl
     << std::endl
     << "    flags"sv << std::endl
     << "        -0 | Read PIN from stdin"sv << std::endl
     << "        -1 | Do not load previously saved state and do retain any state after shutdown"sv << std::endl
     << "           | Effectively starting as if for the first time without overwriting any pairings with your devices"sv << std::endl
-    << "        -2 | Force replacement of headers in video stream" << std::endl;
+    << "        -2 | Force replacement of headers in video stream" << std::endl
+    << "        -p | Enable/Disable UPnP" << std::endl
+    << std::endl;
 }
 
 namespace help {
@@ -208,6 +211,16 @@ int main(int argc, char *argv[]) {
     return 3;
   }
 
+  std::unique_ptr<platf::deinit_t> mDNS;
+  auto sync_mDNS = std::async(std::launch::async, [&mDNS]() {
+    mDNS = platf::publish::start();
+  });
+
+  std::unique_ptr<platf::deinit_t> upnp_unmap;
+  auto sync_upnp = std::async(std::launch::async, [&upnp_unmap]() {
+    upnp_unmap = upnp::start();
+  });
+
   //FIXME: Temporary workaround: Simple-Web_server needs to be updated or replaced
   if(shutdown_event->peek()) {
     return 0;
@@ -217,6 +230,7 @@ int main(int argc, char *argv[]) {
 
   std::thread httpThread { nvhttp::start };
   std::thread configThread { confighttp::start };
+
   stream::rtpThread();
 
   httpThread.join();
@@ -256,4 +270,8 @@ int write_file(const char *path, const std::string_view &contents) {
   out << contents;
 
   return 0;
+}
+
+std::uint16_t map_port(int port) {
+  return (std::uint16_t)((int)config::sunshine.port + port);
 }
