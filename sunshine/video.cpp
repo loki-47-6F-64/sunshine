@@ -71,6 +71,7 @@ platf::pix_fmt_e map_pix_fmt(AVPixelFormat fmt);
 
 util::Either<buffer_t, int> dxgi_make_hwdevice_ctx(platf::hwdevice_t *hwdevice_ctx);
 util::Either<buffer_t, int> vaapi_make_hwdevice_ctx(platf::hwdevice_t *hwdevice_ctx);
+util::Either<buffer_t, int> cuda_make_hwdevice_ctx(platf::hwdevice_t *hwdevice_ctx);
 
 int hwframe_ctx(ctx_t &ctx, buffer_t &hwdevice, AVPixelFormat format);
 
@@ -353,12 +354,11 @@ struct sync_session_ctx_t {
   safe::signal_t *join_event;
   safe::mail_raw_t::event_t<bool> shutdown_event;
   safe::mail_raw_t::queue_t<packet_t> packets;
-  safe::mail_raw_t::event_t<idr_t> idr_events;
+  safe::mail_raw_t::event_t<bool> idr_events;
   safe::mail_raw_t::event_t<input::touch_port_t> touch_port_events;
 
   config_t config;
   int frame_nr;
-  int key_frame_nr;
   void *channel_data;
 };
 
@@ -403,13 +403,19 @@ void end_capture_async(capture_thread_async_ctx_t &ctx);
 auto capture_thread_async = safe::make_shared<capture_thread_async_ctx_t>(start_capture_async, end_capture_async);
 auto capture_thread_sync  = safe::make_shared<capture_thread_sync_ctx_t>(start_capture_sync, end_capture_sync);
 
-#ifdef _WIN32
 static encoder_t nvenc {
   "nvenc"sv,
   { (int)nv::profile_h264_e::high, (int)nv::profile_hevc_e::main, (int)nv::profile_hevc_e::main_10 },
+#ifdef _WIN32
   AV_HWDEVICE_TYPE_D3D11VA,
   AV_PIX_FMT_D3D11,
   AV_PIX_FMT_NV12, AV_PIX_FMT_P010,
+#else
+  AV_HWDEVICE_TYPE_CUDA,
+  AV_PIX_FMT_CUDA,
+  // Fully planar YUV formats are more efficient for sws_scale()
+  AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV420P10,
+#endif
   {
     {
       { "forced-idr"s, 1 },
@@ -433,10 +439,16 @@ static encoder_t nvenc {
     std::make_optional<encoder_t::option_t>({ "qp"s, &config::video.qp }),
     "h264_nvenc"s,
   },
+#ifdef _WIN32
   DEFAULT,
   dxgi_make_hwdevice_ctx
+#else
+  SYSTEM_MEMORY,
+  cuda_make_hwdevice_ctx
+#endif
 };
 
+#ifdef _WIN32
 static encoder_t amdvce {
   "amdvce"sv,
   { FF_PROFILE_H264_HIGH, FF_PROFILE_HEVC_MAIN },
@@ -538,8 +550,8 @@ static encoder_t vaapi {
 #endif
 
 static std::vector<encoder_t> encoders {
-#ifdef _WIN32
   nvenc,
+#ifdef _WIN32
   amdvce,
 #endif
 #ifdef __linux__
@@ -986,7 +998,7 @@ std::optional<session_t> make_session(const encoder_t &encoder, const config_t &
 }
 
 void encode_run(
-  int &frame_nr, int &key_frame_nr, // Store progress of the frame number
+  int &frame_nr, // Store progress of the frame number
   safe::mail_t mail,
   img_event_t images,
   config_t config,
@@ -1009,7 +1021,7 @@ void encode_run(
 
   auto shutdown_event = mail->event<bool>(mail::shutdown);
   auto packets        = mail::man->queue<packet_t>(mail::video_packets);
-  auto idr_events     = mail->event<idr_t>(mail::idr);
+  auto idr_events     = mail->event<bool>(mail::idr);
 
   while(true) {
     if(shutdown_event->peek() || reinit_event.peek() || !images->running()) {
@@ -1020,27 +1032,14 @@ void encode_run(
       frame->pict_type = AV_PICTURE_TYPE_I;
       frame->key_frame = 1;
 
-      auto event = idr_events->pop();
-      if(!event) {
-        return;
-      }
-
-      auto end     = event->second;
-      frame_nr     = end;
-      key_frame_nr = end + config.framerate;
-    }
-    else if(frame_nr == key_frame_nr) {
-      auto frame = session->device->frame;
-
-      frame->pict_type = AV_PICTURE_TYPE_I;
-      frame->key_frame = 1;
+      idr_events->pop();
     }
 
     std::this_thread::sleep_until(next_frame);
     next_frame += delay;
 
     // When Moonlight request an IDR frame, send frames even if there is no new captured frame
-    if(frame_nr > key_frame_nr || images->peek()) {
+    if(!frame->key_frame || images->peek()) {
       if(auto img = images->pop(delay)) {
         session->device->convert(*img);
       }
@@ -1074,13 +1073,18 @@ input::touch_port_t make_port(platf::display_t *display, const config_t &config)
   auto w2 = scalar * wd;
   auto h2 = scalar * hd;
 
+  auto offsetX = (config.width - w2) * 0.5f;
+  auto offsetY = (config.height - h2) * 0.5f;
+
   return input::touch_port_t {
     display->offset_x,
     display->offset_y,
-    (int)w2,
-    (int)h2,
+    config.width,
+    config.height,
     display->env_width,
     display->env_height,
+    offsetX,
+    offsetY,
     1.0f / scalar,
   };
 }
@@ -1209,15 +1213,7 @@ encode_e encode_run_sync(std::vector<std::unique_ptr<sync_session_ctx_t>> &synce
         frame->pict_type = AV_PICTURE_TYPE_I;
         frame->key_frame = 1;
 
-        auto event = ctx->idr_events->pop();
-        auto end   = event->second;
-
-        ctx->frame_nr     = end;
-        ctx->key_frame_nr = end + ctx->config.framerate;
-      }
-      else if(ctx->frame_nr == ctx->key_frame_nr) {
-        frame->pict_type = AV_PICTURE_TYPE_I;
-        frame->key_frame = 1;
+        ctx->idr_events->pop();
       }
 
       if(img_tmp) {
@@ -1314,8 +1310,7 @@ void capture_async(
     return;
   }
 
-  int frame_nr     = 1;
-  int key_frame_nr = 1;
+  int frame_nr = 1;
 
   auto touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
 
@@ -1336,7 +1331,8 @@ void capture_async(
       display = ref->display_wp->lock();
     }
 
-    auto pix_fmt  = config.dynamicRange == 0 ? platf::pix_fmt_e::yuv420p : platf::pix_fmt_e::yuv420p10;
+    auto &encoder = encoders.front();
+    auto pix_fmt  = config.dynamicRange == 0 ? map_pix_fmt(encoder.static_pix_fmt) : map_pix_fmt(encoder.dynamic_pix_fmt);
     auto hwdevice = display->make_hwdevice(pix_fmt);
     if(!hwdevice) {
       return;
@@ -1353,7 +1349,7 @@ void capture_async(
     touch_port_event->raise(make_port(display.get(), config));
 
     encode_run(
-      frame_nr, key_frame_nr,
+      frame_nr,
       mail, images,
       config, display->width, display->height,
       hwdevice.get(),
@@ -1367,9 +1363,9 @@ void capture(
   config_t config,
   void *channel_data) {
 
-  auto idr_events = mail->event<idr_t>(mail::idr);
+  auto idr_events = mail->event<bool>(mail::idr);
 
-  idr_events->raise(std::make_pair(0, 1));
+  idr_events->raise(true);
   if(encoders.front().flags & SYSTEM_MEMORY) {
     capture_async(std::move(mail), config, channel_data);
   }
@@ -1383,7 +1379,6 @@ void capture(
       std::move(idr_events),
       mail->event<input::touch_port_t>(mail::touch_port),
       config,
-      1,
       1,
       channel_data,
     });
@@ -1672,6 +1667,19 @@ util::Either<buffer_t, int> vaapi_make_hwdevice_ctx(platf::hwdevice_t *base) {
   return hw_device_buf;
 }
 
+util::Either<buffer_t, int> cuda_make_hwdevice_ctx(platf::hwdevice_t *base) {
+  buffer_t hw_device_buf;
+
+  auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0);
+  if(status < 0) {
+    char string[AV_ERROR_MAX_STRING_SIZE];
+    BOOST_LOG(error) << "Failed to create a CUDA device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
+    return -1;
+  }
+
+  return hw_device_buf;
+}
+
 #ifdef _WIN32
 }
 
@@ -1739,7 +1747,9 @@ platf::mem_type_e map_dev_type(AVHWDeviceType type) {
     return platf::mem_type_e::dxgi;
   case AV_HWDEVICE_TYPE_VAAPI:
     return platf::mem_type_e::vaapi;
-  case AV_PICTURE_TYPE_NONE:
+  case AV_HWDEVICE_TYPE_CUDA:
+    return platf::mem_type_e::cuda;
+  case AV_HWDEVICE_TYPE_NONE:
     return platf::mem_type_e::system;
   default:
     return platf::mem_type_e::unknown;
@@ -1791,4 +1801,4 @@ color_t colors[] {
   make_color_matrix(0.2126f, 0.0722f, 0.436f, 0.615f, 0.0625, 0.5f, { 16.0f, 235.0f }, { 16.0f, 240.0f }), // BT701 MPEG
   make_color_matrix(0.2126f, 0.0722f, 0.5f, 0.5f, 0.0f, 0.5f, { 0.0f, 255.0f }, { 0.0f, 255.0f }),         // BT701 JPEG
 };
-}
+} // namespace video

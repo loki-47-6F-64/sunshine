@@ -51,6 +51,7 @@ if(WIN32)
 
 	set(PLATFORM_TARGET_FILES
 		sunshine/platform/windows/publish.cpp
+		sunshine/platform/windows/misc.h
 		sunshine/platform/windows/misc.cpp
 		sunshine/platform/windows/input.cpp
 		sunshine/platform/windows/display.h
@@ -144,7 +145,7 @@ else()
 		third-party/glad/include)
 
 	if(NOT DEFINED SUNSHINE_EXECUTABLE_PATH)
-		set(SUNSHINE_EXECUTABLE_PATH "${CMAKE_CURRENT_BINARY_DIR}/sunshine")
+		set(SUNSHINE_EXECUTABLE_PATH "sunshine")
 	endif()
 	configure_file(gen-deb.in gen-deb @ONLY)
 	configure_file(sunshine.service.in sunshine.service @ONLY)

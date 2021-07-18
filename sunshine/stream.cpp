@@ -11,6 +11,7 @@
 #include <openssl/err.h>
 
 extern "C" {
+#include <moonlight-common-c/src/RtpAudioQueue.h>
 #include <moonlight-common-c/src/Video.h>
 #include <rs.h>
 }
@@ -25,13 +26,15 @@ extern "C" {
 #include "utility.h"
 
 #define IDX_START_A 0
-#define IDX_REQUEST_IDR_FRAME 0
 #define IDX_START_B 1
 #define IDX_INVALIDATE_REF_FRAMES 2
 #define IDX_LOSS_STATS 3
 #define IDX_INPUT_DATA 5
 #define IDX_RUMBLE_DATA 6
 #define IDX_TERMINATION 7
+#define IDX_PERIODIC_PING 8
+#define IDX_REQUEST_IDR_FRAME 9
+#define IDX_ENCRYPTED 10
 
 static const short packetTypes[] = {
   0x0305, // Start A
@@ -42,6 +45,9 @@ static const short packetTypes[] = {
   0x0206, // Input data
   0x010b, // Rumble data
   0x0100, // Termination
+  0x0200, // Periodic Ping
+  0x0302, // IDR frame
+  0x0001, // fully encrypted
 };
 
 namespace asio = boost::asio;
@@ -68,6 +74,7 @@ struct video_packet_raw_t {
 
   RTP_PACKET rtp;
   char reserved[4];
+
   NV_VIDEO_PACKET packet;
 };
 
@@ -79,14 +86,73 @@ struct audio_packet_raw_t {
   RTP_PACKET rtp;
 };
 
+struct control_header_v2 {
+  std::uint16_t type;
+  std::uint16_t payloadLength;
+
+  uint8_t *payload() {
+    return (uint8_t *)(this + 1);
+  }
+};
+
+struct control_terminate_t {
+  control_header_v2 header;
+
+  std::uint32_t ec;
+};
+
+typedef struct control_encrypted_t {
+  std::uint16_t encryptedHeaderType; // Always LE 0x0001
+  std::uint16_t length;              // sizeof(seq) + 16 byte tag + secondary header and data
+
+  // seq is accepted as an arbitrary value in Moonlight
+  std::uint32_t seq; // Monotonically increasing sequence number (used as IV for AES-GCM)
+
+  uint8_t *payload() {
+    return (uint8_t *)(this + 1);
+  }
+  // encrypted control_header_v2 and payload data follow
+} * control_encrypted_p;
+
+struct audio_fec_packet_raw_t {
+  uint8_t *payload() {
+    return (uint8_t *)(this + 1);
+  }
+
+  RTP_PACKET rtp;
+  AUDIO_FEC_HEADER fecHeader;
+};
+
 #pragma pack(pop)
 
-using rh_t           = util::safe_ptr<reed_solomon, reed_solomon_release>;
-using video_packet_t = util::c_ptr<video_packet_raw_t>;
-using audio_packet_t = util::c_ptr<audio_packet_raw_t>;
+constexpr std::size_t round_to_pkcs7_padded(std::size_t size) {
+  return ((size + 15) / 16) * 16;
+}
+constexpr std::size_t MAX_AUDIO_PACKET_SIZE = 1400;
+
+using rh_t               = util::safe_ptr<reed_solomon, reed_solomon_release>;
+using video_packet_t     = util::c_ptr<video_packet_raw_t>;
+using audio_packet_t     = util::c_ptr<audio_packet_raw_t>;
+using audio_fec_packet_t = util::c_ptr<audio_fec_packet_raw_t>;
+using audio_aes_t        = std::array<char, round_to_pkcs7_padded(MAX_AUDIO_PACKET_SIZE)>;
 
 using message_queue_t       = std::shared_ptr<safe::queue_t<std::pair<std::uint16_t, std::string>>>;
 using message_queue_queue_t = std::shared_ptr<safe::queue_t<std::tuple<socket_e, asio::ip::address, message_queue_t>>>;
+
+// return bytes written on success
+// return -1 on error
+static inline int encode_audio(int featureSet, const audio::buffer_t &plaintext, audio_packet_t &destination, std::uint32_t avRiKeyIv, crypto::cipher::cbc_t &cbc) {
+  // If encryption isn't enabled
+  if(!(featureSet & 0x20)) {
+    std::copy(std::begin(plaintext), std::end(plaintext), destination->payload());
+    return plaintext.size();
+  }
+
+  crypto::aes_t iv {};
+  *(std::uint32_t *)iv.data() = util::endian::big<std::uint32_t>(avRiKeyIv + destination->rtp.sequenceNumber);
+
+  return cbc.encrypt(std::string_view { (char *)std::begin(plaintext), plaintext.size() }, destination->payload(), &iv);
+}
 
 static inline void while_starting_do_nothing(std::atomic<session::state_e> &state) {
   while(state.load(std::memory_order_acquire) == session::state_e::STARTING) {
@@ -120,18 +186,24 @@ public:
   // Therefore, iterate is implemented further down the source file
   void iterate(std::chrono::milliseconds timeout);
 
+  void call(std::uint16_t type, session_t *session, const std::string_view &payload);
+
   void map(uint16_t type, std::function<void(session_t *, const std::string_view &)> cb) {
     _map_type_cb.emplace(type, std::move(cb));
   }
 
-  void send(const std::string_view &payload) {
-    std::for_each(_host->peers, _host->peers + _host->peerCount, [payload](auto &peer) {
-      auto packet = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-      if(enet_peer_send(&peer, 0, packet)) {
-        enet_packet_destroy(packet);
-      }
-    });
+  int send(const std::string_view &payload, net::peer_t peer) {
+    auto packet = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
+    if(enet_peer_send(peer, 0, packet)) {
+      enet_packet_destroy(packet);
 
+      return -1;
+    }
+
+    return 0;
+  }
+
+  void flush() {
     enet_host_flush(_host.get());
   }
 
@@ -157,6 +229,14 @@ struct broadcast_ctx_t {
 
   udp::socket video_sock { io };
   udp::socket audio_sock { io };
+
+  // This is purely for adminitrative purposes.
+  //
+  // It's possible two instances of Moonlight are behind a NAT.
+  // From Sunshine's point of view, the ip addresses  are identical
+  // We need some way to know what ports are already used for different streams
+  util::sync_t<std::vector<std::pair<std::string, std::uint16_t>>> audio_video_connections;
+
   control_server_t control_server;
 };
 
@@ -177,26 +257,71 @@ struct session_t {
   struct {
     int lowseq;
     udp::endpoint peer;
-    safe::mail_raw_t::event_t<video::idr_t> idr_events;
+    safe::mail_raw_t::event_t<bool> idr_events;
   } video;
 
   struct {
-    std::uint16_t frame;
+    crypto::cipher::cbc_t cipher;
+
+    std::uint16_t sequenceNumber;
+    // avRiKeyId == util::endian::big(First (sizeof(avRiKeyId)) bytes of launch_session->iv)
+    std::uint32_t avRiKeyId;
+    std::uint32_t timestamp;
     udp::endpoint peer;
+
+    util::buffer_t<char> shards;
+    util::buffer_t<uint8_t *> shards_p;
+
+    audio_fec_packet_t fec_packet;
   } audio;
 
   struct {
-    net::peer_t peer;
-  } control;
+    crypto::cipher::gcm_t cipher;
+    crypto::aes_t iv;
 
-  crypto::aes_t gcm_key;
-  crypto::aes_t iv;
+    net::peer_t peer;
+    std::uint8_t seq;
+  } control;
 
   safe::mail_raw_t::event_t<bool> shutdown_event;
   safe::signal_t controlEnd;
 
   std::atomic<session::state_e> state;
 };
+
+/**
+ * First part of cipher must be struct of type control_encrypted_t
+ * 
+ * returns empty string_view on failure
+ * returns string_view pointing to payload data
+ */
+template<std::size_t max_payload_size>
+static inline std::string_view encode_control(session_t *session, const std::string_view &plaintext, std::array<std::uint8_t, max_payload_size> &tagged_cipher) {
+  static_assert(
+    max_payload_size >= sizeof(control_encrypted_t) + sizeof(crypto::cipher::tag_size),
+    "max_payload_size >= sizeof(control_encrypted_t) + sizeof(crypto::cipher::tag_size)");
+
+
+  if(session->config.controlProtocolType != 13) {
+    return plaintext;
+  }
+
+  crypto::aes_t iv {};
+  auto seq = session->control.seq++;
+  iv[0]    = seq;
+
+  auto packet = (control_encrypted_p)tagged_cipher.data();
+
+  auto bytes = session->control.cipher.encrypt(plaintext, packet->payload(), &iv);
+  if(bytes <= 0) {
+    BOOST_LOG(error) << "Couldn't encrypt control data"sv;
+    return {};
+  }
+
+  packet->seq = util::endian::little(seq);
+
+  return std::string_view { (char *)tagged_cipher.data(), (std::size_t)bytes };
+}
 
 int start_broadcast(broadcast_ctx_t &ctx);
 void end_broadcast(broadcast_ctx_t &ctx);
@@ -234,6 +359,21 @@ session_t *control_server_t::get_session(const net::peer_t peer) {
   return nullptr;
 }
 
+void control_server_t::call(std::uint16_t type, session_t *session, const std::string_view &payload) {
+  auto cb = _map_type_cb.find(type);
+  if(cb == std::end(_map_type_cb)) {
+    BOOST_LOG(warning)
+      << "type [Unknown] { "sv << util::hex(type).to_string_view() << " }"sv << std::endl
+      << "---data---"sv << std::endl
+      << util::hex_vec(payload) << std::endl
+      << "---end data---"sv;
+  }
+
+  else {
+    cb->second(session, payload);
+  }
+}
+
 void control_server_t::iterate(std::chrono::milliseconds timeout) {
   ENetEvent event;
   auto res = enet_host_service(_host.get(), &event, timeout.count());
@@ -253,21 +393,10 @@ void control_server_t::iterate(std::chrono::milliseconds timeout) {
     case ENET_EVENT_TYPE_RECEIVE: {
       net::packet_t packet { event.packet };
 
-      auto type = (std::uint16_t *)packet->data;
-      std::string_view payload { (char *)packet->data + sizeof(*type), packet->dataLength - sizeof(*type) };
+      auto type = *(std::uint16_t *)packet->data;
+      std::string_view payload { (char *)packet->data + sizeof(type), packet->dataLength - sizeof(type) };
 
-      auto cb = _map_type_cb.find(*type);
-      if(cb == std::end(_map_type_cb)) {
-        BOOST_LOG(warning)
-          << "type [Unknown] { "sv << util::hex(*type).to_string_view() << " }"sv << std::endl
-          << "---data---"sv << std::endl
-          << util::hex_vec(payload) << std::endl
-          << "---end data---"sv;
-      }
-
-      else {
-        cb->second(session, payload);
-      }
+      call(type, session, payload);
     } break;
     case ENET_EVENT_TYPE_CONNECT:
       BOOST_LOG(info) << "CLIENT CONNECTED"sv;
@@ -309,15 +438,23 @@ struct fec_t {
   }
 };
 
-static fec_t encode(const std::string_view &payload, size_t blocksize, size_t fecpercentage) {
+static fec_t encode(const std::string_view &payload, size_t blocksize, size_t fecpercentage, size_t minparityshards) {
   auto payload_size = payload.size();
 
   auto pad = payload_size % blocksize != 0;
 
   auto data_shards   = payload_size / blocksize + (pad ? 1 : 0);
   auto parity_shards = (data_shards * fecpercentage + 99) / 100;
-  auto nr_shards     = data_shards + parity_shards;
 
+  // increase the FEC percentage for this frame if the parity shard minimum is not met
+  if(parity_shards < minparityshards) {
+    parity_shards = minparityshards;
+    fecpercentage = (100 * parity_shards) / data_shards;
+
+    BOOST_LOG(verbose) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
+  }
+
+  auto nr_shards = data_shards + parity_shards;
   if(nr_shards > DATA_SHARDS_MAX) {
     BOOST_LOG(warning)
       << "Number of fragments for reed solomon exceeds DATA_SHARDS_MAX"sv << std::endl
@@ -388,16 +525,23 @@ std::vector<uint8_t> replace(const std::string_view &original, const std::string
   std::vector<uint8_t> replaced;
 
   auto begin = std::begin(original);
-  auto next  = std::search(begin, std::end(original), std::begin(old), std::end(old));
+  auto end   = std::end(original);
+  auto next  = std::search(begin, end, std::begin(old), std::end(old));
 
   std::copy(begin, next, std::back_inserter(replaced));
-  std::copy(std::begin(_new), std::end(_new), std::back_inserter(replaced));
-  std::copy(next + old.size(), std::end(original), std::back_inserter(replaced));
+  if(next != end) {
+    std::copy(std::begin(_new), std::end(_new), std::back_inserter(replaced));
+    std::copy(next + old.size(), end, std::back_inserter(replaced));
+  }
 
   return replaced;
 }
 
 void controlBroadcastThread(control_server_t *server) {
+  server->map(packetTypes[IDX_PERIODIC_PING], [](session_t *session, const std::string_view &payload) {
+    BOOST_LOG(verbose) << "type [IDX_START_A]"sv;
+  });
+
   server->map(packetTypes[IDX_START_A], [&](session_t *session, const std::string_view &payload) {
     BOOST_LOG(debug) << "type [IDX_START_A]"sv;
   });
@@ -422,6 +566,12 @@ void controlBroadcastThread(control_server_t *server) {
       << "---end stats---";
   });
 
+  server->map(packetTypes[IDX_REQUEST_IDR_FRAME], [&](session_t *session, const std::string_view &payload) {
+    BOOST_LOG(debug) << "type [IDX_REQUEST_IDR_FRAME]"sv;
+
+    session->video.idr_events->raise(true);
+  });
+
   server->map(packetTypes[IDX_INVALIDATE_REF_FRAMES], [&](session_t *session, const std::string_view &payload) {
     auto frames     = (std::int64_t *)payload.data();
     auto firstFrame = frames[0];
@@ -432,34 +582,95 @@ void controlBroadcastThread(control_server_t *server) {
       << "firstFrame [" << firstFrame << ']' << std::endl
       << "lastFrame [" << lastFrame << ']';
 
-    session->video.idr_events->raise(std::make_pair(firstFrame, lastFrame));
+    session->video.idr_events->raise(true);
   });
 
   server->map(packetTypes[IDX_INPUT_DATA], [&](session_t *session, const std::string_view &payload) {
     BOOST_LOG(debug) << "type [IDX_INPUT_DATA]"sv;
 
-    int32_t tagged_cipher_length = util::endian::big(*(int32_t *)payload.data());
+    auto tagged_cipher_length = util::endian::big(*(int32_t *)payload.data());
     std::string_view tagged_cipher { payload.data() + sizeof(tagged_cipher_length), (size_t)tagged_cipher_length };
 
-    crypto::cipher_t cipher { session->gcm_key };
-    cipher.padding = false;
-
     std::vector<uint8_t> plaintext;
-    if(cipher.decrypt_gcm(session->iv, tagged_cipher, plaintext)) {
+
+    auto &cipher = session->control.cipher;
+    auto &iv     = session->control.iv;
+    if(cipher.decrypt(tagged_cipher, plaintext, &iv)) {
       // something went wrong :(
 
       BOOST_LOG(error) << "Failed to verify tag"sv;
 
       session::stop(*session);
+      return;
     }
 
-    if(tagged_cipher_length >= 16 + session->iv.size()) {
-      std::copy(payload.end() - 16, payload.end(), std::begin(session->iv));
+    if(tagged_cipher_length >= 16 + sizeof(crypto::aes_t)) {
+      std::copy(payload.end() - 16, payload.end(), std::begin(iv));
     }
 
     input::print(plaintext.data());
     input::passthrough(session->input, std::move(plaintext));
   });
+
+  server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
+    BOOST_LOG(verbose) << "type [IDX_ENCRYPTED]"sv;
+
+    auto header = (control_encrypted_p)(payload.data() - 2);
+
+    auto length = util::endian::little(header->length);
+    auto seq    = util::endian::little(header->seq);
+
+    if(length < (16 + 4 + 4)) {
+      BOOST_LOG(warning) << "Control: Runt packet"sv;
+      return;
+    }
+
+    auto tagged_cipher_length = length - 4;
+    std::string_view tagged_cipher { (char *)header->payload(), (size_t)tagged_cipher_length };
+
+    auto &cipher = session->control.cipher;
+    crypto::aes_t iv {};
+    iv[0] = (std::uint8_t)seq;
+
+    // update control sequence
+    ++session->control.seq;
+
+    std::vector<uint8_t> plaintext;
+    if(cipher.decrypt(tagged_cipher, plaintext, &iv)) {
+      // something went wrong :(
+
+      BOOST_LOG(error) << "Failed to verify tag"sv;
+
+      session::stop(*session);
+      return;
+    }
+
+    // Ensure compatibility with old packet type
+    std::string_view next_payload { (char *)plaintext.data(), plaintext.size() };
+    auto type = *(std::uint16_t *)next_payload.data();
+
+    if(type == packetTypes[IDX_ENCRYPTED]) {
+      BOOST_LOG(error) << "Bad packet type [IDX_ENCRYPTED] found"sv;
+
+      session::stop(*session);
+      return;
+    }
+
+    // IDX_INPUT_DATA will attempt to decrypt unencrypted data, therefore we need to skip it.
+    if(type != packetTypes[IDX_INPUT_DATA]) {
+      server->call(type, session, next_payload);
+
+      return;
+    }
+
+    // Ensure compatibility with IDX_INPUT_DATA
+    constexpr auto skip = sizeof(std::uint16_t) * 2;
+    plaintext.erase(std::begin(plaintext), std::begin(plaintext) + skip);
+
+    input::print(plaintext.data());
+    input::passthrough(session->input, std::move(plaintext));
+  });
+
 
   auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
   while(!shutdown_event->peek()) {
@@ -492,23 +703,45 @@ void controlBroadcastThread(control_server_t *server) {
     if(proc::proc.running() == -1) {
       BOOST_LOG(debug) << "Process terminated"sv;
 
-      std::uint16_t reason = 0x0100;
-
-      std::array<std::uint16_t, 2> payload;
-      payload[0] = packetTypes[IDX_TERMINATION];
-      payload[1] = reason;
-
-      server->send(std::string_view { (char *)payload.data(), payload.size() });
-
-      auto lg = server->_map_addr_session.lock();
-      for(auto pos = std::begin(*server->_map_addr_session); pos != std::end(*server->_map_addr_session); ++pos) {
-        auto session = pos->second.second;
-        session->shutdown_event->raise(true);
-      }
+      break;
     }
 
     server->iterate(500ms);
   }
+
+  // Let all remaining connections know the server is shutting down
+  // reason: gracefull termination
+  std::uint32_t reason = 0x80030023;
+
+  control_terminate_t plaintext;
+  plaintext.header.type          = packetTypes[IDX_TERMINATION];
+  plaintext.header.payloadLength = sizeof(plaintext.ec);
+  plaintext.ec                   = reason;
+
+  std::array<std::uint8_t,
+    sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(sizeof(plaintext)) + crypto::cipher::tag_size>
+    encrypted_payload;
+
+  auto packet                 = (control_encrypted_p)encrypted_payload.data();
+  packet->encryptedHeaderType = util::endian::little(0x0001);
+  packet->length              = encrypted_payload.size() - sizeof(control_encrypted_t) + 4;
+
+  auto lg = server->_map_addr_session.lock();
+  for(auto pos = std::begin(*server->_map_addr_session); pos != std::end(*server->_map_addr_session); ++pos) {
+    auto session = pos->second.second;
+
+    auto payload = encode_control(session, util::view(plaintext), encrypted_payload);
+
+    if(server->send(payload, session->control.peer)) {
+      TUPLE_2D(port, addr, platf::from_sockaddr_ex((sockaddr *)&session->control.peer->address.address));
+      BOOST_LOG(warning) << "Couldn't send termination code to ["sv << addr << ':' << port << ']';
+    }
+
+    session->shutdown_event->raise(true);
+    session->controlEnd.raise(true);
+  }
+
+  server->flush();
 }
 
 void recvThread(broadcast_ctx_t &ctx) {
@@ -580,7 +813,7 @@ void recvThread(broadcast_ctx_t &ctx) {
 
       auto it = peer_to_session.find(peer.address());
       if(it != std::end(peer_to_session)) {
-        BOOST_LOG(debug) << "RAISE: "sv << peer.address().to_string() << ":"sv << peer.port() << " :: " << type_str;
+        BOOST_LOG(debug) << "RAISE: "sv << peer.address().to_string() << ':' << peer.port() << " :: " << type_str;
         it->second->raise(peer.port(), std::string { buf[buf_elem].data(), bytes });
       }
     };
@@ -638,57 +871,102 @@ void videoBroadcastThread(udp::socket &sock) {
       payload, [&](void *p, int fecIndex, int end) {
         video_packet_raw_t *video_packet = (video_packet_raw_t *)p;
 
-        video_packet->packet.flags             = FLAG_CONTAINS_PIC_DATA;
-        video_packet->packet.frameIndex        = packet->pts;
-        video_packet->packet.streamPacketIndex = ((uint32_t)lowseq + fecIndex) << 8;
-        video_packet->packet.fecInfo           = (fecIndex << 12 |
-                                        end << 22 |
-                                        fecPercentage << 4);
-
-        if(fecIndex == 0) {
-          video_packet->packet.flags |= FLAG_SOF;
-        }
-
-        if(fecIndex == end - 1) {
-          video_packet->packet.flags |= FLAG_EOF;
-        }
-
-        video_packet->rtp.header         = FLAG_EXTENSION;
-        video_packet->rtp.sequenceNumber = util::endian::big<uint16_t>(lowseq + fecIndex);
+        video_packet->packet.flags = FLAG_CONTAINS_PIC_DATA;
       });
 
-    payload = { (char *)payload_new.data(), payload_new.size() };
+    payload = std::string_view { (char *)payload_new.data(), payload_new.size() };
 
-    auto shards = fec::encode(payload, blocksize, fecPercentage);
-    if(shards.data_shards == 0) {
-      BOOST_LOG(info) << "skipping frame..."sv << std::endl;
-      continue;
-    }
+    // With a fecpercentage of 255, if payload_new is broken up into more than a 100 data_shards
+    // it will generate greater than DATA_SHARDS_MAX shards.
+    // Therefore, we start breaking the data up into three seperate fec blocks.
+    auto multi_fec_threshold = 90 * blocksize;
 
-    for(auto x = shards.data_shards; x < shards.size(); ++x) {
-      auto *inspect = (video_packet_raw_t *)shards.data(x);
+    // We can go up to 4 fec blocks, but 3 is plenty
+    constexpr auto MAX_FEC_BLOCKS = 3;
 
-      inspect->packet.frameIndex = packet->pts;
-      inspect->packet.fecInfo    = (x << 12 |
-                                 shards.data_shards << 22 |
-                                 shards.percentage << 4);
+    std::array<std::string_view, MAX_FEC_BLOCKS> fec_blocks;
+    decltype(fec_blocks)::iterator
+      fec_blocks_begin = std::begin(fec_blocks),
+      fec_blocks_end   = std::begin(fec_blocks) + 1;
 
-      inspect->rtp.header         = FLAG_EXTENSION;
-      inspect->rtp.sequenceNumber = util::endian::big<uint16_t>(lowseq + x);
-    }
+    auto lastBlockIndex = 0;
+    if(payload.size() > multi_fec_threshold) {
+      BOOST_LOG(verbose) << "Generating multiple FEC blocks"sv;
 
-    for(auto x = 0; x < shards.size(); ++x) {
-      sock.send_to(asio::buffer(shards[x]), session->video.peer);
-    }
+      // Align individual fec blocks to blocksize
+      auto unaligned_size = payload.size() / MAX_FEC_BLOCKS;
+      auto aligned_size   = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
 
-    if(packet->flags & AV_PKT_FLAG_KEY) {
-      BOOST_LOG(verbose) << "Key Frame ["sv << packet->pts << "] :: send ["sv << shards.size() << "] shards..."sv;
+      // Break the data up into 3 blocks, each containing multiple complete video packets.
+      fec_blocks[0] = payload.substr(0, aligned_size);
+      fec_blocks[1] = payload.substr(aligned_size, aligned_size);
+      fec_blocks[2] = payload.substr(aligned_size * 2);
+
+      lastBlockIndex = 2 << 6;
+      fec_blocks_end = std::end(fec_blocks);
     }
     else {
-      BOOST_LOG(verbose) << "Frame ["sv << packet->pts << "] :: send ["sv << shards.size() << "] shards..."sv << std::endl;
+      BOOST_LOG(verbose) << "Generating single FEC block"sv;
+      fec_blocks[0] = payload;
     }
 
-    session->video.lowseq += shards.size();
+    auto blockIndex = 0;
+    std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
+      auto packets = (current_payload.size() + (blocksize - 1)) / blocksize;
+
+      for(int x = 0; x < packets; ++x) {
+        auto *inspect = (video_packet_raw_t *)&current_payload[x * blocksize];
+
+        inspect->packet.frameIndex        = packet->pts;
+        inspect->packet.streamPacketIndex = ((uint32_t)lowseq + x) << 8;
+
+        // Match multiFecFlags with Moonlight
+        inspect->packet.multiFecFlags  = 0x10;
+        inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
+
+        if(x == 0) {
+          inspect->packet.flags |= FLAG_SOF;
+        }
+
+        if(x == packets - 1) {
+          inspect->packet.flags |= FLAG_EOF;
+        }
+      }
+
+      auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
+
+      // set FEC info now that we know for sure what our percentage will be for this frame
+      for(auto x = 0; x < shards.size(); ++x) {
+        auto *inspect = (video_packet_raw_t *)shards.data(x);
+
+        inspect->packet.fecInfo =
+          (x << 12 |
+            shards.data_shards << 22 |
+            shards.percentage << 4);
+
+        inspect->rtp.header         = 0x80 | FLAG_EXTENSION;
+        inspect->rtp.sequenceNumber = util::endian::big<uint16_t>(lowseq + x);
+
+        inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
+        inspect->packet.frameIndex     = packet->pts;
+      }
+
+      for(auto x = 0; x < shards.size(); ++x) {
+        sock.send_to(asio::buffer(shards[x]), session->video.peer);
+      }
+
+      if(packet->flags & AV_PKT_FLAG_KEY) {
+        BOOST_LOG(verbose) << "Key Frame ["sv << packet->pts << "] :: send ["sv << shards.size() << "] shards..."sv;
+      }
+      else {
+        BOOST_LOG(verbose) << "Frame ["sv << packet->pts << "] :: send ["sv << shards.size() << "] shards..."sv << std::endl;
+      }
+
+      ++blockIndex;
+      lowseq += shards.size();
+    });
+
+    session->video.lowseq = lowseq;
   }
 
   shutdown_event->raise(true);
@@ -698,6 +976,24 @@ void audioBroadcastThread(udp::socket &sock) {
   auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
   auto packets        = mail::man->queue<audio::packet_t>(mail::audio_packets);
 
+  constexpr auto max_block_size = crypto::cipher::round_to_pkcs7_padded(2048);
+
+  audio_packet_t audio_packet { (audio_packet_raw_t *)malloc(sizeof(audio_packet_raw_t) + max_block_size) };
+  fec::rs_t rs { reed_solomon_new(RTPA_DATA_SHARDS, RTPA_FEC_SHARDS) };
+
+  // For unknown reasons, the RS parity matrix computed by our RS implementation
+  // doesn't match the one Nvidia uses for audio data. I'm not exactly sure why,
+  // but we can simply replace it with the matrix generated by OpenFEC which
+  // works correctly. This is possible because the data and FEC shard count is
+  // constant and known in advance.
+  const unsigned char parity[] = { 0x77, 0x40, 0x38, 0x0e, 0xc7, 0xa7, 0x0d, 0x6c };
+  memcpy(&rs.get()->m[16], parity, sizeof(parity));
+  memcpy(rs.get()->parity, parity, sizeof(parity));
+
+  audio_packet->rtp.header     = 0x80;
+  audio_packet->rtp.packetType = 97;
+  audio_packet->rtp.ssrc       = 0;
+
   while(auto packet = packets->pop()) {
     if(shutdown_event->peek()) {
       break;
@@ -706,20 +1002,52 @@ void audioBroadcastThread(udp::socket &sock) {
     TUPLE_2D_REF(channel_data, packet_data, *packet);
     auto session = (session_t *)channel_data;
 
-    auto frame = session->audio.frame++;
+    auto sequenceNumber = session->audio.sequenceNumber;
+    auto timestamp      = session->audio.timestamp;
 
-    audio_packet_t audio_packet { (audio_packet_raw_t *)malloc(sizeof(audio_packet_raw_t) + packet_data.size()) };
+    // This will be mapped to big-endianness later
+    // For now, encode_audio needs it to be the proper sequenceNumber
+    audio_packet->rtp.sequenceNumber = sequenceNumber;
 
-    audio_packet->rtp.header         = 0;
-    audio_packet->rtp.packetType     = 97;
-    audio_packet->rtp.sequenceNumber = util::endian::big(frame);
-    audio_packet->rtp.timestamp      = 0;
-    audio_packet->rtp.ssrc           = 0;
+    auto bytes = encode_audio(session->config.featureFlags, packet_data, audio_packet, session->audio.avRiKeyId, session->audio.cipher);
+    if(bytes < 0) {
+      BOOST_LOG(error) << "Couldn't encode audio packet"sv;
+      break;
+    }
 
-    std::copy(std::begin(packet_data), std::end(packet_data), audio_packet->payload());
+    audio_packet->rtp.sequenceNumber = util::endian::big(sequenceNumber);
+    audio_packet->rtp.timestamp      = util::endian::big(timestamp);
 
-    sock.send_to(asio::buffer((char *)audio_packet.get(), sizeof(audio_packet_raw_t) + packet_data.size()), session->audio.peer);
-    BOOST_LOG(verbose) << "Audio ["sv << frame << "] ::  send..."sv;
+    session->audio.sequenceNumber++;
+    session->audio.timestamp += session->config.audio.packetDuration;
+
+    auto &shards_p = session->audio.shards_p;
+
+    std::copy_n(audio_packet->payload(), bytes, shards_p[sequenceNumber % RTPA_DATA_SHARDS]);
+    sock.send_to(asio::buffer((char *)audio_packet.get(), sizeof(audio_packet_raw_t) + bytes), session->audio.peer);
+
+
+    BOOST_LOG(verbose) << "Audio ["sv << sequenceNumber << "] ::  send..."sv;
+
+    auto &fec_packet = session->audio.fec_packet;
+    // initialize the FEC header at the beginning of the FEC block
+    if(sequenceNumber % RTPA_DATA_SHARDS == 0) {
+      fec_packet->fecHeader.baseSequenceNumber = util::endian::big(sequenceNumber);
+      fec_packet->fecHeader.baseTimestamp      = util::endian::big(timestamp);
+    }
+
+    // generate parity shards at the end of the FEC block
+    if((sequenceNumber + 1) % RTPA_DATA_SHARDS == 0) {
+      reed_solomon_encode(rs.get(), shards_p.begin(), RTPA_TOTAL_SHARDS, bytes);
+
+      for(auto x = 0; x < RTPA_FEC_SHARDS; ++x) {
+        fec_packet->rtp.sequenceNumber      = util::endian::big<std::uint16_t>(sequenceNumber + x + 1);
+        fec_packet->fecHeader.fecShardIndex = x;
+        memcpy(fec_packet->payload(), shards_p[RTPA_DATA_SHARDS + x], bytes);
+        sock.send_to(asio::buffer((char *)fec_packet.get(), sizeof(audio_fec_packet_raw_t) + bytes), session->audio.peer);
+        BOOST_LOG(verbose) << "Audio FEC ["sv << (sequenceNumber & ~(RTPA_DATA_SHARDS - 1)) << ' ' << x << "] ::  send..."sv;
+      }
+    }
   }
 
   shutdown_event->raise(true);
@@ -810,75 +1138,104 @@ void end_broadcast(broadcast_ctx_t &ctx) {
   broadcast_shutdown_event->reset();
 }
 
-int recv_ping(decltype(broadcast)::ptr_t ref, socket_e type, asio::ip::address &addr, std::chrono::milliseconds timeout) {
+int recv_ping(decltype(broadcast)::ptr_t ref, socket_e type, udp::endpoint &peer, std::chrono::milliseconds timeout) {
   auto constexpr ping = "PING"sv;
 
   auto messages = std::make_shared<message_queue_t::element_type>(30);
-  ref->message_queue_queue->raise(type, addr, messages);
+  ref->message_queue_queue->raise(type, peer.address(), messages);
 
   auto fg = util::fail_guard([&]() {
+    messages->stop();
+
     // remove message queue from session
-    ref->message_queue_queue->raise(type, addr, nullptr);
+    ref->message_queue_queue->raise(type, peer.address(), nullptr);
   });
 
-  auto msg_opt = messages->pop(config::stream.ping_timeout);
-  messages->stop();
+  auto start_time   = std::chrono::steady_clock::now();
+  auto current_time = start_time;
 
-  if(!msg_opt) {
-    BOOST_LOG(error) << "Initial Ping Timeout"sv;
+  while(current_time - start_time < config::stream.ping_timeout) {
+    auto delta_time = current_time - start_time;
 
-    return -1;
+    auto msg_opt = messages->pop(config::stream.ping_timeout - delta_time);
+    if(!msg_opt) {
+      break;
+    }
+
+    TUPLE_2D_REF(port, msg, *msg_opt);
+    if(msg == ping) {
+      BOOST_LOG(debug) << "Received ping from "sv << peer.address() << ':' << port << " ["sv << util::hex_vec(msg) << ']';
+
+      // Update connection details.
+      {
+        auto addr_str = peer.address().to_string();
+
+        auto &connections = ref->audio_video_connections;
+
+        auto lg = connections.lock();
+
+        std::remove_reference_t<decltype(*connections)>::iterator pos = std::end(*connections);
+
+        for(auto it = std::begin(*connections); it != std::end(*connections); ++it) {
+          TUPLE_2D_REF(addr, port_ref, *it);
+
+          if(!port_ref && addr_str == addr) {
+            pos = it;
+          }
+          else if(port_ref == port) {
+            break;
+          }
+        }
+
+        if(pos == std::end(*connections)) {
+          continue;
+        }
+
+        pos->second = port;
+        peer.port(port);
+      }
+
+      return port;
+    }
+
+    BOOST_LOG(debug) << "Received non-ping from "sv << peer.address() << ':' << port << " ["sv << util::hex_vec(msg) << ']';
+
+    current_time = std::chrono::steady_clock::now();
   }
 
-  TUPLE_2D_REF(port, msg, *msg_opt);
-  if(msg != ping) {
-    BOOST_LOG(error) << "First message is not a PING";
-    BOOST_LOG(debug) << "Received from "sv << addr << ':' << port << " ["sv << util::hex_vec(msg) << ']';
-
-    return -1;
-  }
-
-  return port;
+  BOOST_LOG(error) << "Initial Ping Timeout"sv;
+  return -1;
 }
 
-void videoThread(session_t *session, std::string addr_str) {
+void videoThread(session_t *session) {
   auto fg = util::fail_guard([&]() {
     session::stop(*session);
   });
 
   while_starting_do_nothing(session->state);
 
-  auto addr = asio::ip::make_address(addr_str);
   auto ref  = broadcast.ref();
-  auto port = recv_ping(ref, socket_e::video, addr, config::stream.ping_timeout);
+  auto port = recv_ping(ref, socket_e::video, session->video.peer, config::stream.ping_timeout);
   if(port < 0) {
     return;
   }
-
-  session->video.peer.address(addr);
-  session->video.peer.port(port);
 
   BOOST_LOG(debug) << "Start capturing Video"sv;
   video::capture(session->mail, session->config.monitor, session);
 }
 
-void audioThread(session_t *session, std::string addr_str) {
+void audioThread(session_t *session) {
   auto fg = util::fail_guard([&]() {
     session::stop(*session);
   });
 
   while_starting_do_nothing(session->state);
 
-  auto addr = asio::ip::make_address(addr_str);
-
   auto ref  = broadcast.ref();
-  auto port = recv_ping(ref, socket_e::audio, addr, config::stream.ping_timeout);
+  auto port = recv_ping(ref, socket_e::audio, session->audio.peer, config::stream.ping_timeout);
   if(port < 0) {
     return;
   }
-
-  session->audio.peer.address(addr);
-  session->audio.peer.port(port);
 
   BOOST_LOG(debug) << "Start capturing Audio"sv;
   audio::capture(session->mail, session->config.audio, session);
@@ -910,6 +1267,42 @@ void join(session_t &session) {
   //Reset input on session stop to avoid stuck repeated keys
   BOOST_LOG(debug) << "Resetting Input..."sv;
   input::reset(session.input);
+
+  BOOST_LOG(debug) << "Removing references to any connections..."sv;
+  {
+    auto video_addr = session.video.peer.address().to_string();
+    auto audio_addr = session.audio.peer.address().to_string();
+
+    auto video_port = session.video.peer.port();
+    auto audio_port = session.audio.peer.port();
+
+    auto &connections = session.broadcast_ref->audio_video_connections;
+
+    auto lg = connections.lock();
+
+    auto validate_size = connections->size();
+    for(auto it = std::begin(*connections); it != std::end(*connections);) {
+      TUPLE_2D_REF(addr, port, *it);
+
+      if((video_port == port && video_addr == addr) ||
+         (audio_port == port && audio_addr == addr)) {
+        it = connections->erase(it);
+      }
+      else {
+        ++it;
+      }
+    }
+
+    auto new_size = connections->size();
+    if(validate_size != new_size + 2) {
+      BOOST_LOG(warning) << "Couldn't remove reference to session connections: ending all broadcasts"sv;
+
+      // A reference to the event object is still stored somewhere else. So no need to keep
+      // a reference to it.
+      mail::man->event<bool>(mail::broadcast_shutdown)->raise(true);
+    }
+  }
+
   BOOST_LOG(debug) << "Session ended"sv;
 }
 
@@ -923,10 +1316,28 @@ int start(session_t &session, const std::string &addr_string) {
 
   session.broadcast_ref->control_server.emplace_addr_to_session(addr_string, session);
 
+  auto addr = boost::asio::ip::make_address(addr_string);
+  session.video.peer.address(addr);
+  session.video.peer.port(0);
+
+  session.audio.peer.address(addr);
+  session.audio.peer.port(0);
+
+  {
+    auto &connections = session.broadcast_ref->audio_video_connections;
+
+    auto lg = connections.lock();
+
+    // allocate a location for connections
+    connections->emplace_back(addr_string, 0);
+    connections->emplace_back(addr_string, 0);
+  }
+
+
   session.pingTimeout = std::chrono::steady_clock::now() + config::stream.ping_timeout;
 
-  session.audioThread = std::thread { audioThread, &session, addr_string };
-  session.videoThread = std::thread { videoThread, &session, addr_string };
+  session.audioThread = std::thread { audioThread, &session };
+  session.videoThread = std::thread { videoThread, &session };
 
   session.state.store(state_e::RUNNING, std::memory_order_relaxed);
 
@@ -940,14 +1351,47 @@ std::shared_ptr<session_t> alloc(config_t &config, crypto::aes_t &gcm_key, crypt
 
   session->shutdown_event = mail->event<bool>(mail::shutdown);
 
-  session->config  = config;
-  session->gcm_key = gcm_key;
-  session->iv      = iv;
+  session->config = config;
 
-  session->video.idr_events = mail->event<video::idr_t>(mail::idr);
+  session->control.iv     = iv;
+  session->control.cipher = crypto::cipher::gcm_t {
+    gcm_key, false
+  };
+
+  session->video.idr_events = mail->event<bool>(mail::idr);
   session->video.lowseq     = 0;
 
-  session->audio.frame = 1;
+  constexpr auto max_block_size = crypto::cipher::round_to_pkcs7_padded(2048);
+
+  util::buffer_t<char> shards { RTPA_TOTAL_SHARDS * max_block_size };
+  util::buffer_t<uint8_t *> shards_p { RTPA_TOTAL_SHARDS };
+
+  for(auto x = 0; x < RTPA_TOTAL_SHARDS; ++x) {
+    shards_p[x] = (uint8_t *)&shards[x * max_block_size];
+  }
+
+  // Audio FEC spans multiple audio packets,
+  // therefore its session specific
+  session->audio.shards   = std::move(shards);
+  session->audio.shards_p = std::move(shards_p);
+
+  session->audio.fec_packet.reset((audio_fec_packet_raw_t *)malloc(sizeof(audio_fec_packet_raw_t) + max_block_size));
+
+  session->audio.fec_packet->rtp.header     = 0x80;
+  session->audio.fec_packet->rtp.packetType = 127;
+  session->audio.fec_packet->rtp.timestamp  = 0;
+  session->audio.fec_packet->rtp.ssrc       = 0;
+
+  session->audio.fec_packet->fecHeader.payloadType = 97;
+  session->audio.fec_packet->fecHeader.ssrc        = 0;
+
+  session->audio.cipher = crypto::cipher::cbc_t {
+    gcm_key, true
+  };
+
+  session->audio.avRiKeyId      = util::endian::big(*(std::uint32_t *)iv.data());
+  session->audio.sequenceNumber = 0;
+  session->audio.timestamp      = 0;
 
   session->control.peer = nullptr;
   session->state.store(state_e::STOPPED, std::memory_order_relaxed);

@@ -33,8 +33,8 @@
 using namespace std::literals;
 namespace nvhttp {
 
-constexpr auto VERSION     = "7.1.400.0";
-constexpr auto GFE_VERSION = "3.12.0.1";
+constexpr auto VERSION     = "7.1.431.0";
+constexpr auto GFE_VERSION = "3.23.0.74";
 
 namespace fs = std::filesystem;
 namespace pt = boost::property_tree;
@@ -222,8 +222,7 @@ void serverchallengeresp(pair_session_t &sess, pt::ptree &tree, const args_t &ar
   auto encrypted_response = util::from_hex_vec(args.at("serverchallengeresp"s), true);
 
   std::vector<uint8_t> decrypted;
-  crypto::cipher_t cipher(*sess.cipher_key);
-  cipher.padding = false;
+  crypto::cipher::ecb_t cipher(*sess.cipher_key, false);
 
   cipher.decrypt(encrypted_response, decrypted);
 
@@ -242,8 +241,7 @@ void serverchallengeresp(pair_session_t &sess, pt::ptree &tree, const args_t &ar
 void clientchallenge(pair_session_t &sess, pt::ptree &tree, const args_t &args) {
   auto challenge = util::from_hex_vec(args.at("clientchallenge"s), true);
 
-  crypto::cipher_t cipher(*sess.cipher_key);
-  cipher.padding = false;
+  crypto::cipher::ecb_t cipher(*sess.cipher_key, false);
 
   std::vector<uint8_t> decrypted;
   cipher.decrypt(challenge, decrypted);
@@ -367,8 +365,11 @@ void not_found(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> resp
   pt::write_xml(data, tree);
   response->write(data.str());
 
-  *response << "HTTP/1.1 404 NOT FOUND\r\n"
-            << data.str();
+  *response
+    << "HTTP/1.1 404 NOT FOUND\r\n"
+    << data.str();
+
+  response->close_connection_after_response = true;
 }
 
 template<class T>
@@ -376,6 +377,14 @@ void pair(std::shared_ptr<safe::queue_t<crypto::x509_t>> &add_cert, std::shared_
   print_req<T>(request);
 
   pt::ptree tree;
+
+  auto fg = util::fail_guard([&]() {
+    std::ostringstream data;
+
+    pt::write_xml(data, tree);
+    response->write(data.str());
+    response->close_connection_after_response = true;
+  });
 
   auto args = request->parse_query_string();
   if(args.find("uniqueid"s) == std::end(args)) {
@@ -400,11 +409,7 @@ void pair(std::shared_ptr<safe::queue_t<crypto::x509_t>> &add_cert, std::shared_
 
       ptr->second.async_insert_pin.salt = std::move(args.at("salt"s));
 
-      if(config::sunshine.flags[config::flag::CONST_PIN]) {
-        std::string pin("6174");
-        getservercert(ptr->second, tree, pin);
-      }
-      else if(config::sunshine.flags[config::flag::PIN_STDIN]) {
+      if(config::sunshine.flags[config::flag::PIN_STDIN]) {
         std::string pin;
 
         std::cout << "Please insert pin: "sv;
@@ -415,6 +420,7 @@ void pair(std::shared_ptr<safe::queue_t<crypto::x509_t>> &add_cert, std::shared_
       else {
         ptr->second.async_insert_pin.response = std::move(response);
 
+        fg.disable();
         return;
       }
     }
@@ -435,11 +441,6 @@ void pair(std::shared_ptr<safe::queue_t<crypto::x509_t>> &add_cert, std::shared_
   else {
     tree.put("root.<xmlattr>.status_code", 404);
   }
-
-  std::ostringstream data;
-
-  pt::write_xml(data, tree);
-  response->write(data.str());
 }
 
 bool pin(std::string pin) {
@@ -475,6 +476,8 @@ bool pin(std::string pin) {
 template<class T>
 void pin(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
   print_req<T>(request);
+
+  response->close_connection_after_response = true;
 
   auto address = request->remote_endpoint_address();
   auto ip_type = net::from_address(address);
@@ -520,6 +523,8 @@ void serverinfo(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> res
   tree.put("root.appversion", VERSION);
   tree.put("root.GfeVersion", GFE_VERSION);
   tree.put("root.uniqueid", http::unique_id);
+  tree.put("root.HttpsPort", map_port(PORT_HTTPS));
+  tree.put("root.ExternalPort", map_port(PORT_HTTP));
   tree.put("root.mac", platf::get_mac_address(request->local_endpoint_address()));
   tree.put("root.MaxLumaPixelsHEVC", config::video.hevc_mode > 1 ? "1869449984" : "0");
   tree.put("root.LocalIP", request->local_endpoint_address());
@@ -572,6 +577,7 @@ void serverinfo(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> res
 
   pt::write_xml(data, tree);
   response->write(data.str());
+  response->close_connection_after_response = true;
 }
 
 void applist(resp_https_t response, req_https_t request) {
@@ -584,6 +590,7 @@ void applist(resp_https_t response, req_https_t request) {
 
     pt::write_xml(data, tree);
     response->write(data.str());
+    response->close_connection_after_response = true;
   });
 
   auto args = request->parse_query_string();
@@ -627,6 +634,7 @@ void launch(bool &host_audio, resp_https_t response, req_https_t request) {
 
     pt::write_xml(data, tree);
     response->write(data.str());
+    response->close_connection_after_response = true;
   });
 
   if(stream::session_count() == config::stream.channels) {
@@ -673,6 +681,7 @@ void launch(bool &host_audio, resp_https_t response, req_https_t request) {
   stream::launch_session_raise(make_launch_session(host_audio, args));
 
   tree.put("root.<xmlattr>.status_code", 200);
+  tree.put("root.sessionUrl0", "rtsp://"s + request->local_endpoint_address() + ':' + std::to_string(map_port(stream::RTSP_SETUP_PORT)));
   tree.put("root.gamesession", 1);
 }
 
@@ -685,6 +694,7 @@ void resume(bool &host_audio, resp_https_t response, req_https_t request) {
 
     pt::write_xml(data, tree);
     response->write(data.str());
+    response->close_connection_after_response = true;
   });
 
   // It is possible that due a race condition that this if-statement gives a false negative,
@@ -718,6 +728,7 @@ void resume(bool &host_audio, resp_https_t response, req_https_t request) {
   stream::launch_session_raise(make_launch_session(host_audio, args));
 
   tree.put("root.<xmlattr>.status_code", 200);
+  tree.put("root.sessionUrl0", "rtsp://"s + request->local_endpoint_address() + ':' + std::to_string(map_port(stream::RTSP_SETUP_PORT)));
   tree.put("root.resume", 1);
 }
 
@@ -730,6 +741,7 @@ void cancel(resp_https_t response, req_https_t request) {
 
     pt::write_xml(data, tree);
     response->write(data.str());
+    response->close_connection_after_response = true;
   });
 
   // It is possible that due a race condition that this if-statement gives a false positive,
@@ -754,6 +766,7 @@ void appasset(resp_https_t response, req_https_t request) {
 
   std::ifstream in(SUNSHINE_ASSETS_DIR "/box.png");
   response->write(SimpleWeb::StatusCode::success_ok, in);
+  response->close_connection_after_response = true;
 }
 
 void start() {
@@ -784,21 +797,37 @@ void start() {
 
   auto add_cert = std::make_shared<safe::queue_t<crypto::x509_t>>(30);
 
-  // Ugly hack for verifying certificates, see crypto::cert_chain_t::verify() for details
-  ctx->set_verify_callback([&cert_chain, add_cert](int verified, boost::asio::ssl::verify_context &ctx) {
+  ctx->set_verify_callback([](int verified, boost::asio::ssl::verify_context &ctx) {
+    // To respond with an error message, a connection must be established
+    return 1;
+  });
+
+  // /resume doesn't get the parameter "localAudioPlayMode"
+  // /launch will store it in host_audio
+  bool host_audio {};
+
+  https_server_t https_server { ctx, boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once };
+  http_server_t http_server;
+
+  // Verify certificates after establishing connection
+  https_server.verify = [&cert_chain, add_cert](SSL *ssl) {
+    auto x509 = SSL_get_peer_certificate(ssl);
+    if(!x509) {
+      BOOST_LOG(info) << "unknown -- denied"sv;
+      return 0;
+    }
+
+    int verified = 0;
+
     auto fg = util::fail_guard([&]() {
       char subject_name[256];
 
-      auto x509 = ctx.native_handle();
-      X509_NAME_oneline(X509_get_subject_name(X509_STORE_CTX_get_current_cert(x509)), subject_name, sizeof(subject_name));
+
+      X509_NAME_oneline(X509_get_subject_name(x509), subject_name, sizeof(subject_name));
 
 
       BOOST_LOG(info) << subject_name << " -- "sv << (verified ? "verfied"sv : "denied"sv);
     });
-
-    if(verified) {
-      return 1;
-    }
 
     while(add_cert->peek()) {
       char subject_name[256];
@@ -810,22 +839,32 @@ void start() {
       cert_chain.add(std::move(cert));
     }
 
-    auto err_str = cert_chain.verify(X509_STORE_CTX_get_current_cert(ctx.native_handle()));
+    auto err_str = cert_chain.verify(x509);
     if(err_str) {
       BOOST_LOG(warning) << "SSL Verification error :: "sv << err_str;
-      return 0;
+
+      return verified;
     }
 
     verified = 1;
-    return 1;
-  });
 
-  // /resume doesn't get the parameter "localAudioPlayMode"
-  // /launch will store it in host_audio
-  bool host_audio {};
+    return verified;
+  };
 
-  https_server_t https_server { ctx, boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once };
-  http_server_t http_server;
+  https_server.on_verify_failed = [](resp_https_t resp, req_https_t req) {
+    pt::ptree tree;
+    auto g = util::fail_guard([&]() {
+      std::ostringstream data;
+
+      pt::write_xml(data, tree);
+      resp->write(data.str());
+      resp->close_connection_after_response = true;
+    });
+
+    tree.put("root.<xmlattr>.status_code"s, 401);
+    tree.put("root.<xmlattr>.query"s, req->path);
+    tree.put("root.<xmlattr>.status_message"s, "The client is not authorized. Certificate verification failed."s);
+  };
 
   https_server.default_resource                   = not_found<SimpleWeb::HTTPS>;
   https_server.resource["^/serverinfo$"]["GET"]   = serverinfo<SimpleWeb::HTTPS>;

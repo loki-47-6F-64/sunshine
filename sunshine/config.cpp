@@ -176,11 +176,11 @@ video_t video {
 audio_t audio {};
 
 stream_t stream {
-  2s, // ping_timeout
+  10s, // ping_timeout
 
   APPS_JSON_PATH,
 
-  10, // fecPercentage
+  20, // fecPercentage
   1   // channels
 };
 
@@ -624,7 +624,7 @@ void apply_config(std::unordered_map<std::string, std::string> &&vars) {
   int_between_f(vars, "channels", stream.channels, { 1, std::numeric_limits<int>::max() });
 
   path_f(vars, "file_apps", stream.file_apps);
-  int_between_f(vars, "fec_percentage", stream.fec_percentage, { 1, 100 });
+  int_between_f(vars, "fec_percentage", stream.fec_percentage, { 1, 255 });
 
   to = std::numeric_limits<int>::min();
   int_f(vars, "back_button_timeout", to);
