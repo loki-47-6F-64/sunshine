@@ -1,4 +1,4 @@
-<div id="app">
+<main role="main" id="app">
   <div class="container py-3">
     <h1>Applications</h1>
     <p class="mb-0">Create, edit and delete applications from this page. Changes are applied immediately, but you may need to restart Moonlight to see the changes.</p>
@@ -104,7 +104,7 @@
       <button class="btn btn-primary" @click="save" v-bind:disabled="isLoading">Save application</button>
     </div>
   </div>
-</div>
+</main>
 
 <script>
   new Vue({
@@ -170,13 +170,3 @@
     }
   })
 </script>
-
-<style>
-  .precmd-head {
-    width: 200px;
-  }
-
-  .monospace {
-    font-family: monospace;
-  }
-</style>
