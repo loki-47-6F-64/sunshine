@@ -132,7 +132,8 @@ void getIndexPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "index.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getPinPage(resp_https_t response, req_https_t request) {
@@ -142,7 +143,8 @@ void getPinPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "pin.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getAppsPage(resp_https_t response, req_https_t request) {
@@ -152,7 +154,8 @@ void getAppsPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "apps.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getClientsPage(resp_https_t response, req_https_t request) {
@@ -162,7 +165,8 @@ void getClientsPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "clients.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getConfigPage(resp_https_t response, req_https_t request) {
@@ -172,7 +176,8 @@ void getConfigPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "config.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getPasswordPage(resp_https_t response, req_https_t request) {
@@ -182,7 +187,8 @@ void getPasswordPage(resp_https_t response, req_https_t request) {
 
   std::string header  = read_file(WEB_DIR "header.html");
   std::string content = read_file(WEB_DIR "password.html");
-  response->write(header + content);
+  std::string footer = read_file(WEB_DIR "footer.html");
+  response->write(header + content + footer);
 }
 
 void getApps(resp_https_t response, req_https_t request) {
