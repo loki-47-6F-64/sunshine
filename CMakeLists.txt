@@ -126,13 +126,6 @@ else()
 		third-party/glad/include/glad/egl.h)
 		
 	set(PLATFORM_LIBRARIES
-		Xfixes
-		Xtst
-		xcb
-		xcb-shm
-		xcb-xfixes
-		Xrandr
-		${X11_LIBRARIES}
 		dl
 		evdev
 		pulse

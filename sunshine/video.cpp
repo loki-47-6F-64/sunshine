@@ -1492,7 +1492,7 @@ retry:
     config_max_ref_frames.videoFormat = 1;
     config_autoselect.videoFormat     = 1;
 
-retry_hevc:
+  retry_hevc:
     auto max_ref_frames_hevc = validate_config(disp, encoder, config_max_ref_frames);
     auto autoselect_hevc     = validate_config(disp, encoder, config_autoselect);
 

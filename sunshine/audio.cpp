@@ -200,7 +200,7 @@ void capture(safe::mail_t mail, config_t config, void *channel_data) {
 
         return;
       }
-      return;
+      continue;
     default:
       return;
     }
