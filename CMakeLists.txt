@@ -106,16 +106,22 @@ else()
 	add_compile_definitions(SUNSHINE_PLATFORM="linux")
 	list(APPEND SUNSHINE_DEFINITIONS APPS_JSON="apps_linux.json")
 
-	find_package(X11 REQUIRED)
-	find_package(FFmpeg REQUIRED)
+	find_package(X11)
+	find_package(FFMPEG REQUIRED)
 
-	set(PLATFORM_TARGET_FILES
+	if(X11_FOUND)
+		list(APPEND PLATFORM_TARGET_FILES
+			sunshine/platform/linux/display.cpp)
+	else()
+		list(APPEND SUNSHINE_DEFINITIONS EGL_NO_X11=1)
+	endif()
+
+	list(APPEND PLATFORM_TARGET_FILES
 		sunshine/platform/linux/publish.cpp
 		sunshine/platform/linux/vaapi.h
 		sunshine/platform/linux/vaapi.cpp
 		sunshine/platform/linux/misc.h
 		sunshine/platform/linux/misc.cpp
-		sunshine/platform/linux/display.cpp
 		sunshine/platform/linux/audio.cpp
 		sunshine/platform/linux/input.cpp
 		third-party/glad/src/egl.c
