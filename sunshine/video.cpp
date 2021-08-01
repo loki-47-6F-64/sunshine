@@ -1395,7 +1395,14 @@ int validate_config(std::shared_ptr<platf::display_t> &disp, const encoder_t &en
 }
 
 bool validate_encoder(encoder_t &encoder) {
+  // Ensure we can create a display.
   std::shared_ptr<platf::display_t> disp;
+
+  reset_display(disp, encoder.dev_type, 60);
+  if(!disp) {
+    return false;
+  }
+  disp.reset();
 
   BOOST_LOG(info) << "Trying encoder ["sv << encoder.name << ']';
   auto fg = util::fail_guard([&]() {

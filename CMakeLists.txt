@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0)
 
 project(Sunshine)
 
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 add_subdirectory(third-party/Simple-Web-Server)
 
@@ -107,13 +107,31 @@ else()
 	list(APPEND SUNSHINE_DEFINITIONS APPS_JSON="apps_linux.json")
 
 	find_package(X11)
+	find_package(PipeWire)
 	find_package(FFMPEG REQUIRED)
 
 	if(X11_FOUND)
+		include_directories(${X11_INCLUDE_DIR})
 		list(APPEND PLATFORM_TARGET_FILES
 			sunshine/platform/linux/display.cpp)
-	else()
+	endif()
+
+	if(PIPEWIRE_FOUND)
+		find_package(Gio REQUIRED)
+
+		include_directories(${GIO_INCLUDE_DIRS}/..)
 		list(APPEND SUNSHINE_DEFINITIONS EGL_NO_X11=1)
+		list(APPEND PLATFORM_TARGET_FILES
+			sunshine/platform/linux/wayland/display.cpp)
+
+		list(APPEND PLATFORM_LIBRARIES
+		PipeWire::PipeWire)
+		
+		set_source_files_properties(sunshine/platform/linux/wayland/display.cpp PROPERTIES COMPILE_FLAGS -Wno-pedantic)
+	endif()
+
+	if(NOT X11_FOUND AND NOT PIPEWIRE_FOUND)
+		message(FATAL_ERROR "Couldn't find either X11 Or Pipewire for capturing desktop")
 	endif()
 
 	list(APPEND PLATFORM_TARGET_FILES
@@ -131,15 +149,13 @@ else()
 		third-party/glad/include/glad/gl.h
 		third-party/glad/include/glad/egl.h)
 		
-	set(PLATFORM_LIBRARIES
+	list(APPEND PLATFORM_LIBRARIES
 		dl
 		evdev
 		pulse
-		pulse-simple
-		)
+		pulse-simple)
 	
-	set(PLATFORM_INCLUDE_DIRS
-		${X11_INCLUDE_DIR}
+	list(APPEND PLATFORM_INCLUDE_DIRS
 		/usr/include/libevdev-1.0
 		third-party/glad/include)
 

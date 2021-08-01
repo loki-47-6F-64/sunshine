@@ -235,6 +235,9 @@ int main(int argc, char *argv[]) {
     shutdown_event->raise(true);
   });
 
+  platf::display(platf::mem_type_e::system, 60);
+  return 0;
+
   proc::refresh(config::stream.file_apps);
 
   auto deinit_guard = platf::init();
