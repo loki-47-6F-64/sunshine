@@ -117,14 +117,22 @@ else()
 	endif()
 
 	if(PIPEWIRE_FOUND)
+		find_package(GLIB REQUIRED)
 		find_package(Gio REQUIRED)
 
-		include_directories(${GIO_INCLUDE_DIRS}/..)
+		include_directories(
+			${GIO_INCLUDE_DIRS}/..
+			${GLIB_INCLUDE_DIRS})
+
 		list(APPEND SUNSHINE_DEFINITIONS EGL_NO_X11=1)
 		list(APPEND PLATFORM_TARGET_FILES
-			sunshine/platform/linux/wayland/display.cpp)
+			sunshine/platform/linux/wayland/display.cpp
+			sunshine/platform/linux/wayland/portal.h
+			sunshine/platform/linux/wayland/portal.cpp)
 
 		list(APPEND PLATFORM_LIBRARIES
+		${GIO_LIBRARIES}
+		${GLIB_LIBRARIES}
 		PipeWire::PipeWire)
 		
 		set_source_files_properties(sunshine/platform/linux/wayland/display.cpp PROPERTIES COMPILE_FLAGS -Wno-pedantic)

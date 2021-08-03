@@ -1459,7 +1459,7 @@ bool validate_encoder(encoder_t &encoder) {
   // Ensure we can create a display.
   std::shared_ptr<platf::display_t> disp;
 
-  reset_display(disp, encoder.dev_type, 60);
+  reset_display(disp, encoder.dev_type, ""s, 60);
   if(!disp) {
     return false;
   }

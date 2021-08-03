@@ -4,6 +4,7 @@
 
 #include <pipewire/pipewire.h>
 
+#include "portal.h"
 #include "sunshine/main.h"
 #include "sunshine/platform/common.h"
 
@@ -268,15 +269,62 @@ struct wayland_t : public display_t {
   std::chrono::nanoseconds delay;
 };
 
-std::shared_ptr<display_t> display(mem_type_e mem_type, int framerate) {
+std::shared_ptr<display_t> display(mem_type_e mem_type, const std::string &display_name, int framerate) {
   auto shutdown = mail::man->event<bool>(mail::shutdown);
 
-  pw::control_t control;
-  if(control.init(60)) {
-    // return nullptr;
+  auto loop = std::make_unique<portal::loop_t>();
+  loop->start(std::launch::async);
+
+  if(!portal::dbus() || !portal::proxy()) {
+    return nullptr;
   }
 
+  auto capture_types = portal::capture_types(portal::proxy());
+  if(!capture_types) {
+    BOOST_LOG(error) << "Couldn't find available capture types"sv;
+
+    return nullptr;
+  }
+
+  if(capture_types & portal::WINDOW) {
+    BOOST_LOG(debug) << "PipeWire Desktop capture supported"sv;
+  }
+  if(capture_types & portal::WINDOW) {
+    BOOST_LOG(debug) << "PipeWire Window capture supported"sv;
+  }
+
+  auto mouse_types = portal::mouse_types(portal::proxy());
+  if(!mouse_types) {
+    BOOST_LOG(error) << "Couldn't find available mouse types"sv;
+
+    return nullptr;
+  }
+
+  if(mouse_types & portal::METADATA) {
+    BOOST_LOG(debug) << "PipeWire Mouse Meta Data supported"sv;
+  }
+  if(mouse_types & portal::ALWAYS_VISIBLE) {
+    BOOST_LOG(debug) << "PipeWire Mouse always visible supported"sv;
+  }
+  if(mouse_types & portal::HIDDEN) {
+    BOOST_LOG(debug) << "PipeWire Mouse hidden supported"sv;
+  }
+
+  auto session = portal::session_t::make(
+    portal::dbus(), portal::proxy(),
+    portal::DESKTOP, portal::METADATA);
+
+  BOOST_LOG(info) << "Name: "sv << portal::unique_name(portal::dbus());
+
+  // pw::control_t control;
+  // if(control.init(60)) {
+  //   return nullptr;
+  // }
+
   shutdown->view();
+
   return nullptr;
 }
+
+std::vector<std::string> display_names() { return {}; }
 } // namespace platf
