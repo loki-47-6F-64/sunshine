@@ -6,6 +6,7 @@ Sunshine is a Gamestream host for Moonlight
 
 - [Building](README.md#building)
 - [Credits](README.md#credits)
+- [Donation](README.md#donation)
 
 # Building
 - [Linux](README.md#linux)
