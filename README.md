@@ -106,6 +106,11 @@ All shortcuts start with CTRL + ALT + SHIFT, just like Moonlight
 - [Looking-Glass](https://github.com/gnif/LookingGlass) (For showing me how to properly capture frames on Windows, saving me a lot of time :)
 - [Eretik](http://eretik.omegahg.com/) (For creating PolicyConfig.h, allowing me to change the default audio device on Windows programmatically)
 
+## Donation
+
+If you wish to support me as a developer, you can donate here:
+[SubscribeStar](https://emea01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.subscribestar.com%2Fsunshine&amp;data=04%7C01%7C%7Cdcaeb7ce96ed466c72dd08d9576f255f%7C84df9e7fe9f640afb435aaaaaaaaaaaa%7C1%7C0%7C637636957137848039%7CUnknown%7CTWFpbGZsb3d8eyJWIjoiMC4wLjAwMDAiLCJQIjoiV2luMzIiLCJBTiI6Ik1haWwiLCJXVCI6Mn0%3D%7C1000&amp;sdata=AplGbsAiyULRWxoppf8Qgev0nLfB5w32BkYKeQMYlKk%3D&amp;reserved=0%22%3Ehttps://emea01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.subscribestar.com%2Fsunshine&amp;data=04%7C01%7C%7Cdcaeb7ce96ed466c72dd08d9576f255f%7C84df9e7fe9f640afb435aaaaaaaaaaaa%7C1%7C0%7C637636957137858031%7CUnknown%7CTWFpbGZsb3d8eyJWIjoiMC4wLjAwMDAiLCJQIjoiV2luMzIiLCJBTiI6Ik1haWwiLCJXVCI6Mn0%3D%7C1000&amp;sdata=G3lbfM82WUul9vOivEstWO9obkxPnXeTLPWdnp8keqo%3D&amp;reserved=0%3C/a)
+
 ## Application List:
 **Note:** You can change the Application List in the "Apps" section of the User Interface `https://xxx.xxx.xxx.xxx:47990/`
 - You can use Environment variables in place of values
