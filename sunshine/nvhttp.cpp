@@ -768,7 +768,7 @@ void appasset(resp_https_t response, req_https_t request) {
   auto args = request->parse_query_string();
   
   if(args.find("appid"s) == std::end(args)) {
-    std::ifstream in(SUNSHINE_ASSETS_DIR "box.png");
+    std::ifstream in(SUNSHINE_ASSETS_DIR "/box.png");
     response->write(SimpleWeb::StatusCode::success_ok, in);
   }
   
