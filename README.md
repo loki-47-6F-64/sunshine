@@ -171,6 +171,9 @@ All shortcuts start with CTRL + ALT + SHIFT, just like Moonlight
 			- If it fails, Sunshine is terminated
 	- cmd <optional>: The main application
 		- If not specified, a processs is started that sleeps indefinitely
+	- box-art-path: The box art you wish to be displayed for the app.
+		- If not specificed, a fallback image is used.
+		- It is recommended that your box art aspect ratio be 3:4 and you should only use PNG or JPG/JPEG images.
 
 1. When an application is started, if there is an application already running, it will be terminated.
 2. When the application has been shutdown, the stream shuts down as well.
@@ -197,7 +200,8 @@ Linux
 
 		"output":"steam.txt",
 		"cmd":"steam -bigpicture",
-		"prep-cmd":[]
+		"prep-cmd":[],
+		"box-art-path": "/absolute/path/to/your/box/art.png"
 	}
 	]
 }

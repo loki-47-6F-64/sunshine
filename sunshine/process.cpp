@@ -280,6 +280,7 @@ std::optional<proc::proc_t> parse(const std::string &file_name) {
       auto name               = parse_env_val(this_env, app_node.get<std::string>("name"s));
       auto cmd                = app_node.get_optional<std::string>("cmd"s);
       auto working_dir        = app_node.get_optional<std::string>("working-dir"s);
+      auto box_art_path       = app_node.get_optional<std::string>("box-art-path"s);
 
       std::vector<proc::cmd_t> prep_cmds;
       if(prep_nodes_opt) {
@@ -319,6 +320,10 @@ std::optional<proc::proc_t> parse(const std::string &file_name) {
 
       if(working_dir) {
         ctx.working_dir = parse_env_val(this_env, *working_dir);
+      }
+
+      if(box_art_path) {
+        ctx.box_art_path = parse_env_val(this_env, *box_art_path);
       }
 
       ctx.name      = std::move(name);

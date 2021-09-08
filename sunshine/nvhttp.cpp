@@ -764,9 +764,18 @@ void cancel(resp_https_t response, req_https_t request) {
 void appasset(resp_https_t response, req_https_t request) {
   print_req<SimpleWeb::HTTPS>(request);
 
-  std::ifstream in(SUNSHINE_ASSETS_DIR "/box.png");
-  response->write(SimpleWeb::StatusCode::success_ok, in);
   response->close_connection_after_response = true;
+  auto args = request->parse_query_string();
+  
+  if(args.find("appid"s) == std::end(args)) {
+    std::ifstream in(SUNSHINE_ASSETS_DIR "box.png");
+    response->write(SimpleWeb::StatusCode::success_ok, in);
+  }
+  
+  auto appid = util::from_view(args.at("appid")) - 1;
+
+  std::ifstream in(proc::proc.get_apps().at(appid).box_art_path);
+  response->write(SimpleWeb::StatusCode::success_ok, in);
 }
 
 void start() {

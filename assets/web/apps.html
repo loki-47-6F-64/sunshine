@@ -166,6 +166,22 @@
           If not set, Sunshine will default to the parent directory of the command
         </div>
       </div>
+      <div class="mb-3">
+        <label for="appBoxArt" class="form-label">Box Art</label>
+        <input
+          type="text"
+          class="form-control monospace"
+          id="appBoxArt"
+          aria-describedby="appBoxArtHelp"
+          v-model="editForm['box-art-path']"
+        />
+        <div id="appBoxArtHelp" class="form-text">
+          The absolute path to the box art you wish to associate with this application.
+          The box art you provide should have an aspect ratio of 3:4 and be a PNG or JPG/JPEG; 
+          other image formats have not been tested.
+          If not set, the client connecting to Sunshine will use a placeholder image for the box art.
+        </div>
+      </div>
       <!--buttons-->
       <div class="d-flex">
         <button @click="showEditForm = false" class="btn btn-secondary m-2">
@@ -208,6 +224,7 @@
           index: -1,
           "prep-cmd": [],
           detached: [],
+          "box-art-path": "",
         };
         this.editForm.index = -1;
         this.showEditForm = true;

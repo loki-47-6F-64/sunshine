@@ -35,10 +35,11 @@ struct cmd_t {
  *    No session is running and a different set of commands it to be executed
  *    Command exits
  * working_dir -- the process working directory. This is required for some games to run properly.
- * cmd_output --
+ * output --
  *    empty    -- The output of the commands are appended to the output of sunshine
  *    "null"   -- The output of the commands are discarded
  *    filename -- The output of the commands are appended to filename
+ * box_art_path -- absolute path for box art. This is optional.
  */
 struct ctx_t {
   std::vector<cmd_t> prep_cmds;
@@ -55,6 +56,7 @@ struct ctx_t {
   std::string cmd;
   std::string working_dir;
   std::string output;
+  std::string box_art_path;
 };
 
 class proc_t {
