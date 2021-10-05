@@ -93,8 +93,8 @@ bool authenticate(resp_https_t response, req_https_t request) {
   }
 
   //If credentials are shown, redirect the user to a /welcome page
-  if(config::sunshine.username.empty()){
-    send_redirect(response,request,"/welcome");
+  if(config::sunshine.username.empty()) {
+    send_redirect(response, request, "/welcome");
     return false;
   }
 
@@ -202,8 +202,8 @@ void getPasswordPage(resp_https_t response, req_https_t request) {
 
 void getWelcomePage(resp_https_t response, req_https_t request) {
   print_req(request);
-  if(!config::sunshine.username.empty()){
-    send_redirect(response,request,"/");
+  if(!config::sunshine.username.empty()) {
+    send_redirect(response, request, "/");
     return;
   }
   std::string header  = read_file(WEB_DIR "header-no-nav.html");
@@ -453,16 +453,18 @@ void savePassword(resp_https_t response, req_https_t request) {
     auto newPassword     = inputTree.count("newPassword") > 0 ? inputTree.get<std::string>("newPassword") : "";
     auto confirmPassword = inputTree.count("confirmNewPassword") > 0 ? inputTree.get<std::string>("confirmNewPassword") : "";
     if(newUsername.length() == 0) newUsername = username;
-    if(newUsername.length() == 0){
+    if(newUsername.length() == 0) {
       outputTree.put("status", false);
       outputTree.put("error", "Invalid Username");
-    } else {
+    }
+    else {
       auto hash = util::hex(crypto::hash(password + config::sunshine.salt)).to_string();
       if(config::sunshine.username.empty() || (username == config::sunshine.username && hash == config::sunshine.password)) {
         if(newPassword.empty() || newPassword != confirmPassword) {
           outputTree.put("status", false);
           outputTree.put("error", "Password Mismatch");
-        } else {
+        }
+        else {
           http::save_user_creds(config::sunshine.credentials_file, newUsername, newPassword);
           http::reload_user_creds(config::sunshine.credentials_file);
           outputTree.put("status", true);
@@ -512,9 +514,9 @@ void savePin(resp_https_t response, req_https_t request) {
   }
 }
 
-void unpairAll(resp_https_t response, req_https_t request){
+void unpairAll(resp_https_t response, req_https_t request) {
   if(!authenticate(response, request)) return;
-  
+
   print_req(request);
 
   pt::ptree outputTree;
@@ -528,9 +530,9 @@ void unpairAll(resp_https_t response, req_https_t request){
   outputTree.put("status", true);
 }
 
-void closeApp(resp_https_t response, req_https_t request){
+void closeApp(resp_https_t response, req_https_t request) {
   if(!authenticate(response, request)) return;
-  
+
   print_req(request);
 
   pt::ptree outputTree;
@@ -541,7 +543,11 @@ void closeApp(resp_https_t response, req_https_t request){
     response->write(data.str());
   });
 
-  proc::proc.terminate();
+  {
+    auto lg = proc::proc.lock();
+    proc::proc->terminate();
+  }
+
   outputTree.put("status", true);
 }
 

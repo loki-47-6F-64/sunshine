@@ -757,7 +757,7 @@ void controlBroadcastThread(control_server_t *server) {
       })
     }
 
-    if(proc::proc.running() == -1) {
+    if(proc::proc->running() == -1) {
       BOOST_LOG(debug) << "Process terminated"sv;
 
       break;

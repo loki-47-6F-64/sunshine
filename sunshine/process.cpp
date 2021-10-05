@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
+#include <boost/filesystem.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
-#include <boost/filesystem.hpp>
 
 #include "main.h"
 #include "utility.h"
@@ -21,7 +21,85 @@ using namespace std::literals;
 namespace bp = boost::process;
 namespace pt = boost::property_tree;
 
-proc_t proc;
+util::sync_t<proc_t> proc;
+
+std::string_view::iterator find_match(char in, char out, std::string_view::iterator begin, std::string_view::iterator end) {
+  int stack = 0;
+
+  --begin;
+  do {
+    ++begin;
+
+    if(*begin == in) {
+      ++stack;
+    }
+    else if(*begin == out) {
+      --stack;
+    }
+  } while(begin != end && stack != 0);
+
+  if(begin == end) {
+    throw std::out_of_range("Missing closing character \'" + out + '\'');
+  }
+  return begin;
+}
+
+template<class F>
+std::string parse(char in, char out, const std::string_view &val_raw, F &&f) {
+  auto pos    = std::begin(val_raw);
+  auto dollar = std::find(pos, std::end(val_raw), '$');
+
+  std::stringstream ss;
+
+  while(dollar != std::end(val_raw)) {
+    auto next = dollar + 1;
+    if(next != std::end(val_raw)) {
+      if(*next == in) {
+        ss.write(pos, (dollar - pos));
+        auto var_begin = next + 1;
+        auto var_end   = find_match(in, out, next, std::end(val_raw));
+
+        ss << f(var_begin, var_end);
+
+        pos  = var_end + 1;
+        next = var_end;
+      }
+      else if(*next == '$') {
+        ss.write(pos, (next - pos));
+        pos = next + 1;
+        ++next;
+      }
+
+      dollar = std::find(next, std::end(val_raw), '$');
+    }
+    else {
+      dollar = next;
+    }
+  }
+
+  ss.write(pos, (dollar - pos));
+
+  return ss.str();
+}
+
+std::string parse_env_val(bp::native_environment &env, const std::string_view &val_raw) {
+  return parse('(', ')', val_raw, [&](const char *begin, const char *end) -> std::string {
+    return env[std::string { begin, end }].to_string();
+  });
+}
+
+std::string parse_command(const std::string_view &cmd, const std::unordered_map<std::string_view, std::string_view> &args) {
+  return parse('[', ']', cmd, [&](const char *begin, const char *end) -> std::string {
+    std::string_view arg { begin, (std::size_t)(end - begin) };
+
+    auto val = args.find(arg);
+    if(val == std::end(args)) {
+      return {};
+    }
+
+    return std::string { val->second.data(), val->second.size() };
+  });
+}
 
 void process_end(bp::child &proc, bp::group &proc_handle) {
   if(!proc.running()) {
@@ -43,7 +121,7 @@ int exe(const std::string &cmd, bp::environment &env, file_t &file, std::error_c
   return bp::system(cmd, env, bp::std_out > file.get(), bp::std_err > file.get(), ec);
 }
 
-int proc_t::execute(int app_id) {
+int proc_t::execute(int app_id, const std::unordered_map<std::string_view, std::string_view> &args) {
   if(!running() && _app_id != -1) {
     // previous process exited on it's own, reset _process_handle
     _process_handle = bp::group();
@@ -77,7 +155,7 @@ int proc_t::execute(int app_id) {
   });
 
   for(; _undo_it != std::end(proc.prep_cmds); ++_undo_it) {
-    auto &cmd = _undo_it->do_cmd;
+    auto cmd = parse_command(_undo_it->do_cmd, args);
 
     BOOST_LOG(info) << "Executing: ["sv << cmd << ']';
     auto ret = exe(cmd, _env, _pipe, ec);
@@ -93,7 +171,9 @@ int proc_t::execute(int app_id) {
     }
   }
 
-  for(auto &cmd : proc.detached) {
+  for(auto &cmd_raw : proc.detached) {
+    auto cmd = parse_command(cmd_raw, args);
+
     BOOST_LOG(info) << "Spawning ["sv << cmd << ']';
     if(proc.output.empty() || proc.output == "null"sv) {
       bp::spawn(cmd, _env, bp::std_out > bp::null, bp::std_err > bp::null, ec);
@@ -107,24 +187,28 @@ int proc_t::execute(int app_id) {
     }
   }
 
+  auto cmd = parse_command(proc.cmd, args);
   if(proc.cmd.empty()) {
     BOOST_LOG(debug) << "Executing [Desktop]"sv;
     placebo = true;
-  } else {
-    boost::filesystem::path working_dir = proc.working_dir.empty() ? 
-    boost::filesystem::path(proc.cmd).parent_path() : boost::filesystem::path(proc.working_dir);
+  }
+  else {
+    boost::filesystem::path working_dir = proc.working_dir.empty() ?
+                                            boost::filesystem::path(proc.cmd).parent_path() :
+                                            boost::filesystem::path(proc.working_dir);
+
     if(proc.output.empty() || proc.output == "null"sv) {
-      BOOST_LOG(info) << "Executing: ["sv << proc.cmd << ']';
-      _process = bp::child(_process_handle, proc.cmd, _env, bp::start_dir(working_dir), bp::std_out > bp::null, bp::std_err > bp::null, ec);
+      BOOST_LOG(info) << "Executing: ["sv << cmd << ']';
+      _process = bp::child(_process_handle, cmd, _env, bp::start_dir(working_dir), bp::std_out > bp::null, bp::std_err > bp::null, ec);
     }
     else {
-      BOOST_LOG(info) << "Executing: ["sv << proc.cmd << ']';
-      _process = bp::child(_process_handle, proc.cmd, _env, bp::start_dir(working_dir), bp::std_out > _pipe.get(), bp::std_err > _pipe.get(), ec);
+      BOOST_LOG(info) << "Executing: ["sv << cmd << ']';
+      _process = bp::child(_process_handle, cmd, _env, bp::start_dir(working_dir), bp::std_out > _pipe.get(), bp::std_err > _pipe.get(), ec);
     }
   }
 
   if(ec) {
-    BOOST_LOG(warning) << "Couldn't run ["sv << proc.cmd << "]: System: "sv << ec.message();
+    BOOST_LOG(warning) << "Couldn't run ["sv << cmd << "]: System: "sv << ec.message();
     return -1;
   }
 
@@ -191,68 +275,6 @@ std::vector<ctx_t> &proc_t::get_apps() {
 
 proc_t::~proc_t() {
   terminate();
-}
-
-std::string_view::iterator find_match(std::string_view::iterator begin, std::string_view::iterator end) {
-  int stack = 0;
-
-  --begin;
-  do {
-    ++begin;
-    switch(*begin) {
-    case '(':
-      ++stack;
-      break;
-    case ')':
-      --stack;
-    }
-  } while(begin != end && stack != 0);
-
-  if(begin == end) {
-    throw std::out_of_range("Missing closing bracket \')\'");
-  }
-  return begin;
-}
-
-std::string parse_env_val(bp::native_environment &env, const std::string_view &val_raw) {
-  auto pos    = std::begin(val_raw);
-  auto dollar = std::find(pos, std::end(val_raw), '$');
-
-  std::stringstream ss;
-
-  while(dollar != std::end(val_raw)) {
-    auto next = dollar + 1;
-    if(next != std::end(val_raw)) {
-      switch(*next) {
-      case '(': {
-        ss.write(pos, (dollar - pos));
-        auto var_begin = next + 1;
-        auto var_end   = find_match(next, std::end(val_raw));
-
-        ss << env[std::string { var_begin, var_end }].to_string();
-
-        pos  = var_end + 1;
-        next = var_end;
-
-        break;
-      }
-      case '$':
-        ss.write(pos, (next - pos));
-        pos = next + 1;
-        ++next;
-        break;
-      }
-
-      dollar = std::find(next, std::end(val_raw), '$');
-    }
-    else {
-      dollar = next;
-    }
-  }
-
-  ss.write(pos, (dollar - pos));
-
-  return ss.str();
 }
 
 std::optional<proc::proc_t> parse(const std::string &file_name) {

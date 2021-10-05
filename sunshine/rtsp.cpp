@@ -18,6 +18,7 @@ extern "C" {
 #include "input.h"
 #include "main.h"
 #include "network.h"
+#include "process.h"
 #include "rtsp.h"
 #include "stream.h"
 #include "sync.h"
@@ -651,6 +652,23 @@ void cmd_announce(rtsp_server_t *server, tcp::socket &sock, msg_t &&req) {
 
     respond(sock, &option, 400, "BAD REQUEST", req->sequenceNumber, {});
     return;
+  }
+
+  auto appid = launch_session->appid;
+  if(appid >= 0) {
+    // Special variables.
+
+    args.emplace("height"sv, args.at("x-nv-video[0].clientViewportHt"sv));
+    args.emplace("width"sv, args.at("x-nv-video[0].clientViewportWd"sv));
+    args.emplace("fps"sv, args.at("x-nv-video[0].maxFPS"sv));
+
+    auto lg  = proc::proc.lock();
+    auto err = proc::proc->execute(appid, args);
+    if(err) {
+      respond(sock, &option, 500, "Couldn't launch application: Internal Server Error", req->sequenceNumber, {});
+
+      return;
+    }
   }
 
   auto session = session::alloc(config, launch_session->gcm_key, launch_session->iv);

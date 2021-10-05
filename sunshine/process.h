@@ -15,6 +15,7 @@
 #include <boost/process.hpp>
 
 #include "utility.h"
+#include "sync.h"
 
 namespace proc {
 using file_t = util::safe_ptr_v2<FILE, int, fclose>;
@@ -63,11 +64,12 @@ public:
 
   proc_t(
     boost::process::environment &&env,
-    std::vector<ctx_t> &&apps) : _app_id(-1),
-                                 _env(std::move(env)),
-                                 _apps(std::move(apps)) {}
+    std::vector<ctx_t> &&apps)
+      : _app_id(-1),
+        _env(std::move(env)),
+        _apps(std::move(apps)) {}
 
-  int execute(int app_id);
+  int execute(int app_id, const std::unordered_map<std::string_view, std::string_view> &args);
 
   /**
    * @return _app_id if a process is running, otherwise returns -1
@@ -101,6 +103,6 @@ private:
 void refresh(const std::string &file_name);
 std::optional<proc::proc_t> parse(const std::string &file_name);
 
-extern proc_t proc;
+extern util::sync_t<proc_t> proc;
 } // namespace proc
 #endif //SUNSHINE_PROCESS_H

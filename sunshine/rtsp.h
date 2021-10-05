@@ -17,6 +17,8 @@ struct launch_session_t {
   crypto::aes_t gcm_key;
   crypto::aes_t iv;
 
+  int appid;
+
   bool host_audio;
 };
 

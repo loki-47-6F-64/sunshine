@@ -186,7 +186,7 @@ void update_id_client(const std::string &uniqueID, std::string &&cert, op_e op) 
   }
 }
 
-stream::launch_session_t make_launch_session(bool host_audio, const args_t &args) {
+stream::launch_session_t make_launch_session(bool host_audio, int appid, const args_t &args) {
   stream::launch_session_t launch_session;
 
   launch_session.host_audio = host_audio;
@@ -196,6 +196,8 @@ stream::launch_session_t make_launch_session(bool host_audio, const args_t &args
 
   auto next = std::copy(prepend_iv_p, prepend_iv_p + sizeof(prepend_iv), std::begin(launch_session.iv));
   std::fill(next, std::end(launch_session.iv), 0);
+
+  launch_session.appid = appid;
 
   return launch_session;
 }
@@ -568,7 +570,8 @@ void serverinfo(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> res
   if(!config::nvhttp.resolutions.empty()) {
     tree.add_child("root.SupportedDisplayMode", display_nodes);
   }
-  auto current_appid = proc::proc.running();
+
+  auto current_appid = proc::proc->running();
   tree.put("root.PairStatus", pair_status);
   tree.put("root.currentgame", current_appid >= 0 ? current_appid + 1 : 0);
   tree.put("root.state", current_appid >= 0 ? "SUNSHINE_SERVER_BUSY" : "SUNSHINE_SERVER_FREE");
@@ -614,7 +617,7 @@ void applist(resp_https_t response, req_https_t request) {
   apps.put("<xmlattr>.status_code", 200);
 
   int x = 0;
-  for(auto &proc : proc::proc.get_apps()) {
+  for(auto &proc : proc::proc->get_apps()) { // apps don't change between invocations
     pt::ptree app;
 
     app.put("IsHdrSupported"s, config::video.hevc_mode == 3 ? 1 : 0);
@@ -659,7 +662,7 @@ void launch(bool &host_audio, resp_https_t response, req_https_t request) {
 
   auto appid = util::from_view(args.at("appid")) - 1;
 
-  auto current_appid = proc::proc.running();
+  auto current_appid = proc::proc->running();
   if(current_appid != -1) {
     tree.put("root.resume", 0);
     tree.put("root.<xmlattr>.status_code", 400);
@@ -667,18 +670,9 @@ void launch(bool &host_audio, resp_https_t response, req_https_t request) {
     return;
   }
 
-  if(appid >= 0) {
-    auto err = proc::proc.execute(appid);
-    if(err) {
-      tree.put("root.<xmlattr>.status_code", err);
-      tree.put("root.gamesession", 0);
-
-      return;
-    }
-  }
 
   host_audio = util::from_view(args.at("localAudioPlayMode"));
-  stream::launch_session_raise(make_launch_session(host_audio, args));
+  stream::launch_session_raise(make_launch_session(host_audio, appid, args));
 
   tree.put("root.<xmlattr>.status_code", 200);
   tree.put("root.sessionUrl0", "rtsp://"s + request->local_endpoint_address() + ':' + std::to_string(map_port(stream::RTSP_SETUP_PORT)));
@@ -706,7 +700,7 @@ void resume(bool &host_audio, resp_https_t response, req_https_t request) {
     return;
   }
 
-  auto current_appid = proc::proc.running();
+  auto current_appid = proc::proc->running();
   if(current_appid == -1) {
     tree.put("root.resume", 0);
     tree.put("root.<xmlattr>.status_code", 503);
@@ -725,7 +719,7 @@ void resume(bool &host_audio, resp_https_t response, req_https_t request) {
     return;
   }
 
-  stream::launch_session_raise(make_launch_session(host_audio, args));
+  stream::launch_session_raise(make_launch_session(host_audio, -1, args));
 
   tree.put("root.<xmlattr>.status_code", 200);
   tree.put("root.sessionUrl0", "rtsp://"s + request->local_endpoint_address() + ':' + std::to_string(map_port(stream::RTSP_SETUP_PORT)));
@@ -756,8 +750,9 @@ void cancel(resp_https_t response, req_https_t request) {
   tree.put("root.cancel", 1);
   tree.put("root.<xmlattr>.status_code", 200);
 
-  if(proc::proc.running() != -1) {
-    proc::proc.terminate();
+  auto lg = proc::proc.lock();
+  if(proc::proc->running() != -1) {
+    proc::proc->terminate();
   }
 }
 
@@ -928,7 +923,7 @@ void start() {
   tcp.join();
 }
 
-void erase_all_clients(){
+void erase_all_clients() {
   map_id_client.clear();
   save_state();
 }

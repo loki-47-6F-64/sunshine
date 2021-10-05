@@ -4,9 +4,9 @@
 	},
 	"apps":[
 	{
-		"name":"Low Res Desktop",
+		"name":"Change Resolution Desktop",
 		"prep-cmd":[
-		{ "do":"xrandr --output HDMI-1 --mode 1920x1080", "undo":"xrandr --output HDMI-1 --mode 1920x1200" }
+		{ "do":"xrandr --mode $[width]x$[height]", "undo":"xrandr --auto" }
 		]
 	},
 	{
