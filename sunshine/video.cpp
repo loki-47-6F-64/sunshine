@@ -1828,4 +1828,8 @@ color_t colors[] {
   make_color_matrix(0.2126f, 0.0722f, 0.436f, 0.615f, 0.0625, 0.5f, { 16.0f, 235.0f }, { 16.0f, 240.0f }), // BT701 MPEG
   make_color_matrix(0.2126f, 0.0722f, 0.5f, 0.5f, 0.0f, 0.5f, { 0.0f, 255.0f }, { 0.0f, 255.0f }),         // BT701 JPEG
 };
+
+std::vector<std::string> get_available_displays(){
+  return platf::display_names(map_dev_type(encoders.front().dev_type));
+}
 } // namespace video

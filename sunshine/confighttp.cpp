@@ -29,6 +29,7 @@
 #include "rtsp.h"
 #include "utility.h"
 #include "uuid.h"
+#include "video.h"
 
 using namespace std::literals;
 
@@ -555,6 +556,29 @@ void closeApp(resp_https_t response, req_https_t request){
   outputTree.put("status", true);
 }
 
+void getDisplays(resp_https_t response, req_https_t request) {
+  if(!authenticate(response, request)) return;
+  
+  print_req(request);
+
+  pt::ptree outputTree;
+
+  auto g = util::fail_guard([&]() {
+    std::ostringstream data;
+    pt::write_json(data, outputTree);
+    response->write(data.str());
+  });
+  std::vector<std::string> displays = video::get_available_displays();
+  outputTree.put("status", true);
+  pt::ptree displaysJson;
+  for(std::string display : displays){
+    pt::ptree dj;
+    dj.put("",display);
+    displaysJson.push_back(std::make_pair("",dj));
+  }
+  outputTree.push_back(std::make_pair("displays", displaysJson));
+}
+
 void start() {
   auto shutdown_event = mail::man->event<bool>(mail::shutdown);
 
@@ -582,6 +606,7 @@ void start() {
   server.resource["^/api/apps/([0-9]+)$"]["DELETE"]                = deleteApp;
   server.resource["^/api/clients/unpair$"]["POST"]                 = unpairAll;
   server.resource["^/api/apps/close"]["POST"]                      = closeApp;
+  server.resource["^/api/config/displays"]["GET"]                  = getDisplays;
   server.resource["^/third_party/bootstrap.min.css$"]["GET"]       = getBootstrapCss;
   server.resource["^/third_party/bootstrap.bundle.min.js$"]["GET"] = getBootstrapJs;
   server.resource["^/third_party/vue.js$"]["GET"]                  = getVueJs;
