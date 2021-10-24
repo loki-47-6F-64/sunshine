@@ -1,4 +1,4 @@
-![Sunshine icon](gamepad.png "Sunshine")
+![Sunshine icon](assets/web/third_party/sunshine.svg "Sunshine")
 # Introduction
 Sunshine is a Gamestream host for Moonlight
 
