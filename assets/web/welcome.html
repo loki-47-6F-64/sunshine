@@ -1,13 +1,15 @@
 <main role="main" id="app" style="max-width: 600px; margin: 0 auto">
   <header>
-    <h1 class="mb-0">Welcome to Sunshine!</h1>
-    <p class="mb-0 align-self-start">
-      Before Getting Started, write down below these credentials
+    <h1 class="my-2">
+      <img src="third_party/sunshine.svg" alt="">
+      Welcome to Sunshine!
+    </h1>
+    <p class="my-2 align-self-start">
+      Before Getting Started, we need you to make a new username and password for accessing the Web UI.
     </p>
   </header>
   <div class="alert alert-warning">
-    These Credentials down below are needed to access the rest of the
-    application.<br />
+    These Credentials down below are needed to access Sunshine's Web UI.<br />
     Keep them safe, since <b>you will never see them again!</b>
   </div>
   <form @submit.prevent="save">

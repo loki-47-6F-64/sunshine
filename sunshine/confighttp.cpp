@@ -242,6 +242,16 @@ void getVueJs(resp_https_t response, req_https_t request) {
   response->write(content);
 }
 
+
+void getSunshineSvg(resp_https_t response, req_https_t request) {
+  print_req(request);
+  const SimpleWeb::CaseInsensitiveMultimap headers {
+    { "Content-Type", "image/svg+xml" }
+  };
+  std::string content = read_file(WEB_DIR "third_party/sunshine.svg");
+  response->write(content,headers);
+}
+
 void getApps(resp_https_t response, req_https_t request) {
   if(!authenticate(response, request)) return;
 
@@ -575,6 +585,7 @@ void start() {
   server.resource["^/third_party/bootstrap.min.css$"]["GET"]       = getBootstrapCss;
   server.resource["^/third_party/bootstrap.bundle.min.js$"]["GET"] = getBootstrapJs;
   server.resource["^/third_party/vue.js$"]["GET"]                  = getVueJs;
+  server.resource["^/third_party/sunshine.svg$"]["GET"]            = getSunshineSvg;
   server.config.reuse_address                                      = true;
   server.config.address                                            = "0.0.0.0"s;
   server.config.port                                               = port_https;

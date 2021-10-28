@@ -16,7 +16,10 @@
       style="background-color: #ffc400"
     >
       <div class="container-fluid">
-        <span class="navbar-brand">Sunshine</span>
+        <span class="navbar-brand">
+          <img src="/third_party/sunshine.svg" alt="" width="48px" height="48px">
+          Sunshine
+        </span>
         <button
           class="navbar-toggler"
           type="button"
@@ -54,3 +57,14 @@
     </nav>
   </body>
 </html>
+
+<script>
+  let el = document.querySelector("a[href='"+document.location.pathname+"']");
+  if(el)el.classList.add("active")
+</script>
+
+<style>
+  .nav-link.active {
+    font-weight: 500;
+  }
+</style>
