@@ -90,7 +90,6 @@ void capture(
   void *channel_data);
 
 int init();
-std::vector<std::string> get_available_displays();
 } // namespace video
 
 #endif //SUNSHINE_VIDEO_H
