@@ -166,6 +166,8 @@ static std::uint32_t from_view(const std::string_view &string) {
   _CONVERT("HDMI-B"sv, HDMIB);
   _CONVERT("eDP"sv, eDP);
   _CONVERT("DSI"sv, DSI);
+  _CONVERT("HEADLESS"sv, VIRTUAL);
+  _CONVERT("Virtual"sv, VIRTUAL);
 
   BOOST_LOG(error) << "Unknown Monitor connector type ["sv << string << "]: Please report this to the Github issue tracker"sv;
   return DRM_MODE_CONNECTOR_Unknown;
