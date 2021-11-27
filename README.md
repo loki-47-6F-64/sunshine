@@ -58,7 +58,7 @@ You might require ffmpeg version >= 4.3. Check the troubleshooting section for m
 - `git clone https://github.com/loki-47-6F-64/sunshine.git --recurse-submodules`
 - `cd sunshine && mkdir build && cd build`
 - `cmake -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10 ..`
-- `make -j ${nproc}`
+- `make -j $(nproc)`
 
 ### Setup:
 sunshine needs access to uinput to create mouse and gamepad events:
@@ -120,7 +120,7 @@ First you need to install [MSYS2](https://www.msys2.org), then startup "MSYS2 Mi
 - `git clone https://github.com/loki-47-6F-64/sunshine.git --recursive`
 - `cd sunshine && mkdir build && cd build`
 - `cmake -G"Unix Makefiles" ..`
-- `mingw32-make`
+- `mingw32-make -j $(nproc)`
 
 ### Setup:
 - **OPTIONAL** Gamepad support: Download and run 'ViGEmBus_Setup_1.16.116.exe' from [https://github.com/ViGEm/ViGEmBus/releases]
