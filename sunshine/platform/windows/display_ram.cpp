@@ -181,9 +181,11 @@ capture_e display_ram_t::capture(snapshot_cb_t &&snapshot_cb, std::shared_ptr<::
     case platf::capture_e::error:
       return status;
     case platf::capture_e::timeout:
+      dup.release_frame();
       std::this_thread::sleep_for(1ms);
       continue;
     case platf::capture_e::ok:
+      dup.release_frame();
       img = snapshot_cb(img);
       break;
     default:
