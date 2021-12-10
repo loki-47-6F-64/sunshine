@@ -59,9 +59,10 @@ capture_e duplication_t::release_frame() {
   case DXGI_ERROR_WAIT_TIMEOUT:
     return capture_e::timeout;
   case WAIT_ABANDONED:
-  case DXGI_ERROR_ACCESS_LOST:
+  case DXGI_ERROR_INVALID_CALL:
   case DXGI_ERROR_ACCESS_DENIED:
     has_frame = false;
+  case DXGI_ERROR_ACCESS_LOST:
     return capture_e::reinit;
   default:
     BOOST_LOG(error) << "Couldn't release frame [0x"sv << util::hex(status).to_string_view();
