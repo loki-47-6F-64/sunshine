@@ -11,7 +11,10 @@ and Nvidia GPUs for hardware encoding. Software encoding is also available. You 
 Moonlight client on a variety of devices. A web UI is provided to allow configuration, and client pairing, from \
 your favorite web browser. Pair from the local server or any mobile device.")
 
+option(PACKAGE_MODE "Use external dependencies when possible" OFF)
+
 # Check if env vars are defined before attempting to access them, variables will be defined even if blank
+if(NOT PACKAGE_MODE)
 if((DEFINED ENV{BRANCH}) AND (DEFINED ENV{BUILD_VERSION}) AND (DEFINED ENV{COMMIT}))  # cmake-lint: disable=W0106
     if(($ENV{BRANCH} STREQUAL "master") AND (NOT $ENV{BUILD_VERSION} STREQUAL ""))
         # If BRANCH is "master" and BUILD_VERSION is not empty, then we are building a master branch
@@ -69,6 +72,7 @@ else()
         MESSAGE(WARNING ": Git not found, cannot find git version")
     endif()
 endif()
+endif(NOT PACKAGE_MODE)
 
 option(SUNSHINE_CONFIGURE_APPIMAGE "Configuration specific for AppImage." OFF)
 option(SUNSHINE_CONFIGURE_AUR "Configure files required for AUR." OFF)
@@ -120,17 +124,25 @@ endif()
 add_subdirectory(third-party/moonlight-common-c/enet)
 add_subdirectory(third-party/Simple-Web-Server)
 
-set(UPNPC_BUILD_SHARED OFF CACHE BOOL "no shared libraries")
-set(UPNPC_BUILD_TESTS OFF CACHE BOOL "Don't build tests for miniupnpc")
-set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "Don't build samples for miniupnpc")
-set(UPNPC_NO_INSTALL ON CACHE BOOL "Don't install any libraries build for miniupnpc")
-add_subdirectory(third-party/miniupnp/miniupnpc)
-include_directories(SYSTEM third-party/miniupnp/miniupnpc/include)
+if(NOT PACKAGE_MODE)
+	set(UPNPC_BUILD_SHARED OFF CACHE BOOL "no shared libraries")
+	set(UPNPC_BUILD_TESTS OFF CACHE BOOL "Don't build tests for miniupnpc")
+	set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "Don't build samples for miniupnpc")
+	set(UPNPC_NO_INSTALL ON CACHE BOOL "Don't install any libraries build for miniupnpc")
+	add_subdirectory(third-party/miniupnp/miniupnpc)
+	include_directories(third-party/miniupnp)
+else(NOT PACKAGE_MODE)
+	find_library(MINIUPNPC miniupnpc REQUIRED)
+	message(STATUS "Found miniupnpc: ${MINIUPNPC}")
+endif(NOT PACKAGE_MODE)
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(CURL REQUIRED libcurl)
+
+if(NOT PACKAGE_MODE)
+	set(Boost_USE_STATIC_LIBS ON)
+endif(NOT PACKAGE_MODE)
+find_package(Boost COMPONENTS log filesystem REQUIRED)
 
 if(WIN32)
     set(Boost_USE_STATIC_LIBS ON)  # cmake-lint: disable=C0103
@@ -548,6 +560,7 @@ set_source_files_properties(third-party/nanors/rs.c
 list(APPEND SUNSHINE_DEFINITIONS SUNSHINE_TRAY=${SUNSHINE_TRAY})
 
 # Pre-compiled binaries
+if(NOT PACKAGE_MODE)
 if(WIN32)
     set(FFMPEG_PREPARED_BINARIES "${CMAKE_CURRENT_SOURCE_DIR}/third-party/ffmpeg-windows-x86_64")
     set(FFMPEG_PLATFORM_LIBRARIES mfplat ole32 strmiids mfuuid mfx)
@@ -584,6 +597,27 @@ set(FFMPEG_LIBRARIES
         ${FFMPEG_PREPARED_BINARIES}/lib/libx265.a
         ${HDR10_PLUS_LIBRARY}
         ${FFMPEG_PLATFORM_LIBRARIES})
+else(NOT PACKAGE_MODE)
+	find_package(PkgConfig REQUIRED)
+	pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+		libavcodec
+		libavutil
+		libswscale
+		x264
+		x265
+	)
+
+	set(FFMPEG_LIBRARIES
+		PkgConfig::FFMPEG
+	)
+	set(FFMPEG_INCLUDE_DIRS FFMPEG_INCLUDEDIR)
+
+	pkg_check_modules(HDR10PLUS IMPORTED_TARGET libhdr10plus)
+	if(HDR10PLUS_FOUND)
+		set(HDR10_PLUS_LIBRARY PkgConfig::HDR10PLUS)
+		set(FFMPEG_INCLUDE_DIRS "${FFMPEG_INCLUDE_DIRS} ${HDR10PLUS_INCLUDEDIR}")
+	endif(HDR10PLUS)
+endif(NOT PACKAGE_MODE)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -603,7 +637,10 @@ if("${BUILD_TYPE}" STREQUAL "XDEBUG")
         set_source_files_properties(src/nvhttp.cpp PROPERTIES COMPILE_FLAGS -O2)
     endif()
 else()
-    add_definitions(-DNDEBUG)
+	add_definitions(-DNDEBUG)
+	if(NOT PACKAGE_MODE)
+		list(APPEND SUNSHINE_COMPILE_OPTIONS -O3)
+	endif(NOT PACKAGE_MODE)
 endif()
 
 # setup assets directory
@@ -632,6 +669,14 @@ list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
         ${OPENSSL_LIBRARIES}
         ${CURL_LIBRARIES}
         ${PLATFORM_LIBRARIES})
+
+if(NOT PACKAGE_MODE)
+	list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
+		libminiupnpc-static)
+else(NOT PACKAGE_MODE)
+	list(APPEND SUNSHINE_EXTERNAL_LIBRARIES
+		${MINIUPNPC})
+endif(NOT PACKAGE_MODE)
 
 if(NOT WIN32)
     list(APPEND SUNSHINE_EXTERNAL_LIBRARIES Boost::log)
