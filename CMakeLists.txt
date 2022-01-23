@@ -23,7 +23,7 @@ include_directories(third-party/miniupnp)
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-set(Boost_USE_STATIC_LIBS ON)
+#set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost COMPONENTS log filesystem REQUIRED)
 
 list(APPEND SUNSHINE_COMPILE_OPTIONS -Wall -Wno-missing-braces -Wno-maybe-uninitialized -Wno-sign-compare)
@@ -379,3 +379,4 @@ foreach(flag IN LISTS SUNSHINE_COMPILE_OPTIONS)
 endforeach()
 
 target_compile_options(sunshine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${SUNSHINE_COMPILE_OPTIONS}>;$<$<COMPILE_LANGUAGE:CUDA>:${SUNSHINE_COMPILE_OPTIONS_CUDA};-std=c++17>)
+set(CMAKE_EXE_LINKER_FLAGS "-lxdo")

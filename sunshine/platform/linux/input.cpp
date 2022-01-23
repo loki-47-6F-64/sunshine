@@ -4,6 +4,7 @@
 
 #include <libevdev/libevdev-uinput.h>
 #include <libevdev/libevdev.h>
+#include <xdo.h>
 
 #include <cmath>
 #include <cstring>
@@ -680,11 +681,15 @@ public:
 
   ~input_raw_t() {
     clear();
+    if(xdo) {
+      xdo_free(xdo);
+    }
   }
 
   safe::shared_t<rumble_ctx_t>::ptr_t rumble_ctx;
 
   std::vector<std::pair<uinput_t, gamepad_state_t>> gamepads;
+  xdo_t *xdo = nullptr;
   uinput_t mouse_input;
   uinput_t touch_input;
   uinput_t keyboard_input;
@@ -899,7 +904,17 @@ void broadcastRumble(safe::queue_t<mail_evdev_t> &rumble_queue_queue) {
 
 
 void abs_mouse(input_t &input, const touch_port_t &touch_port, float x, float y) {
-  auto touchscreen = ((input_raw_t *)input.get())->touch_input.get();
+  auto input_raw = (input_raw_t *)input.get();
+  if(input_raw->xdo) {
+    unsigned int viewport_width = 1, viewport_height = 1;
+    int screen = 0; //XXX
+    xdo_get_viewport_dimensions(input_raw->xdo, &viewport_width, &viewport_height, screen);
+    auto scaled_x = (int)std::lround((x + touch_port.offset_x) * ((float)viewport_width / (float)touch_port.width));
+    auto scaled_y = (int)std::lround((y + touch_port.offset_y) * ((float)viewport_height / (float)touch_port.height));
+    xdo_move_mouse(input_raw->xdo, scaled_x, scaled_y, screen);
+    return;
+  }
+  auto touchscreen = input_raw->touch_input.get();
 
   auto scaled_x = (int)std::lround((x + touch_port.offset_x) * ((float)target_touch_port.width / (float)touch_port.width));
   auto scaled_y = (int)std::lround((y + touch_port.offset_y) * ((float)target_touch_port.height / (float)touch_port.height));
@@ -913,7 +928,12 @@ void abs_mouse(input_t &input, const touch_port_t &touch_port, float x, float y)
 }
 
 void move_mouse(input_t &input, int deltaX, int deltaY) {
-  auto mouse = ((input_raw_t *)input.get())->mouse_input.get();
+  auto input_raw = (input_raw_t *)input.get();
+  if(input_raw->xdo) {
+    xdo_move_mouse_relative(input_raw->xdo, deltaX, deltaY);
+    return;
+  }
+  auto mouse = input_raw->mouse_input.get();
 
   if(deltaX) {
     libevdev_uinput_write_event(mouse, EV_REL, REL_X, deltaX);
@@ -927,6 +947,19 @@ void move_mouse(input_t &input, int deltaX, int deltaY) {
 }
 
 void button_mouse(input_t &input, int button, bool release) {
+  auto input_raw = (input_raw_t *)input.get();
+  if(input_raw->xdo)
+  {
+    if(button > 3) {
+      return;
+    }
+    if(release) {
+      xdo_mouse_up(input_raw->xdo, CURRENTWINDOW, button);
+    } else {
+      xdo_mouse_down(input_raw->xdo, CURRENTWINDOW, button);
+    }
+    return;
+  }
   int btn_type;
   int scan;
 
@@ -951,7 +984,7 @@ void button_mouse(input_t &input, int button, bool release) {
     scan     = 90005;
   }
 
-  auto mouse = ((input_raw_t *)input.get())->mouse_input.get();
+  auto mouse = input_raw->mouse_input.get();
   libevdev_uinput_write_event(mouse, EV_MSC, MSC_SCAN, scan);
   libevdev_uinput_write_event(mouse, EV_KEY, btn_type, release ? 0 : 1);
   libevdev_uinput_write_event(mouse, EV_SYN, SYN_REPORT, 0);
@@ -959,6 +992,21 @@ void button_mouse(input_t &input, int button, bool release) {
 
 void scroll(input_t &input, int high_res_distance) {
   int distance = high_res_distance / 120;
+  auto input_raw = (input_raw_t *)input.get();
+  if(input_raw->xdo) {
+    //XXX
+    int key = 5;
+    if(distance < 0)
+    {
+      distance = -distance;
+      key = 4;
+    }
+    while(distance--) {
+      xdo_mouse_down(input_raw->xdo, CURRENTWINDOW, key);
+      xdo_mouse_up(input_raw->xdo, CURRENTWINDOW, key);
+    }
+    return;
+  }
 
   auto mouse = ((input_raw_t *)input.get())->mouse_input.get();
   libevdev_uinput_write_event(mouse, EV_REL, REL_WHEEL, distance);
@@ -975,12 +1023,25 @@ static keycode_t keysym(std::uint16_t modcode) {
 }
 
 void keyboard(input_t &input, uint16_t modcode, bool release) {
-  auto keyboard = ((input_raw_t *)input.get())->keyboard_input.get();
+  auto input_raw = (input_raw_t *)input.get();
 
   auto keycode = keysym(modcode);
   if(keycode.keycode == UNKNOWN) {
     return;
   }
+
+  if(input_raw->xdo) {
+    char buf[32] = {0};
+    snprintf(buf, 31, "0%d", keycode.keycode+8);
+    if(release) {
+      xdo_send_keysequence_window_up(input_raw->xdo, CURRENTWINDOW, buf, 0);
+    } else {
+      xdo_send_keysequence_window_down(input_raw->xdo, CURRENTWINDOW, buf, 0);
+    }
+    return;
+  }
+
+  auto keyboard = input_raw->keyboard_input.get();
 
   if(keycode.scancode != UNKNOWN && (release || !keycode.pressed)) {
     libevdev_uinput_write_event(keyboard, EV_MSC, MSC_SCAN, keycode.scancode);
@@ -1001,7 +1062,11 @@ void free_gamepad(input_t &input, int nr) {
 }
 
 void gamepad(input_t &input, int nr, const gamepad_state_t &gamepad_state) {
-  TUPLE_2D_REF(uinput, gamepad_state_old, ((input_raw_t *)input.get())->gamepads[nr]);
+  auto input_raw = (input_raw_t *)input.get();
+  if(input_raw->xdo) {
+    return;
+  }
+  TUPLE_2D_REF(uinput, gamepad_state_old, input_raw->gamepads[nr]);
 
 
   auto bf     = gamepad_state.buttonFlags ^ gamepad_state_old.buttonFlags;
@@ -1250,7 +1315,13 @@ input_t input() {
   gp.gamepad_dev  = x360();
 
   // If we do not have a keyboard, gamepad or mouse, no input is possible and we should abort
-  if(gp.create_mouse() || gp.create_touchscreen() || gp.create_keyboard()) {
+  if(getenv("USE_XDO") && !strcmp(getenv("USE_XDO"), "1")) {
+    if(!(gp.xdo = xdo_new(getenv("DISPLAY")))) {
+      BOOST_LOG(error) << "Could not open xdo!" << std::endl;
+      log_flush();
+      abort();
+    }
+  } else if(gp.create_mouse() || gp.create_touchscreen() || gp.create_keyboard()) {
     log_flush();
     std::abort();
   }
