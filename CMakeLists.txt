@@ -23,12 +23,12 @@ include_directories(third-party/miniupnp)
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-#set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost COMPONENTS log filesystem REQUIRED)
 
 list(APPEND SUNSHINE_COMPILE_OPTIONS -Wall -Wno-missing-braces -Wno-maybe-uninitialized -Wno-sign-compare)
 
 if(WIN32)
+	set(Boost_USE_STATIC_LIBS ON)
 	enable_language(RC)
 	set(CMAKE_RC_COMPILER windres)
 	file(
@@ -108,6 +108,7 @@ if(WIN32)
 	set_source_files_properties(third-party/ViGEmClient/src/ViGEmClient.cpp PROPERTIES COMPILE_FLAGS "-Wno-unknown-pragmas -Wno-misleading-indentation -Wno-class-memaccess")
 else()
 	add_compile_definitions(SUNSHINE_PLATFORM="linux")
+	set(CMAKE_EXE_LINKER_FLAGS "-lxdo")
 	list(APPEND SUNSHINE_DEFINITIONS APPS_JSON="apps_linux.json")
 
 	option(SUNSHINE_ENABLE_DRM "Enable KMS grab if available" ON)
@@ -379,4 +380,3 @@ foreach(flag IN LISTS SUNSHINE_COMPILE_OPTIONS)
 endforeach()
 
 target_compile_options(sunshine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${SUNSHINE_COMPILE_OPTIONS}>;$<$<COMPILE_LANGUAGE:CUDA>:${SUNSHINE_COMPILE_OPTIONS_CUDA};-std=c++17>)
-set(CMAKE_EXE_LINKER_FLAGS "-lxdo")
