@@ -10,9 +10,19 @@ These scripts use docker under the hood, as such, they can only be used to compi
 
 
 #### Requirements
-
+Ensure you have docker installed:
 ```
 sudo apt install docker
+```
+
+If you haven't cloned this repo yet, clone it with the `--recurse-submodules` flag:
+```
+git clone --recurse-submodules https://github.com/loki-47-6F-64/sunshine.git
+```
+
+If you have already cloned the repo, then ensure the submodules are available:
+```
+git submodule update --init --recursive
 ```
 
 #### instructions
@@ -32,13 +42,13 @@ cd scripts
 
 Then, the sources will be compiled and the debian package generated:
 ```
-./build-sunshine -p -s ..
+./build-sunshine.sh -p -s ..
 ```
-You can run `build-sunshine -p -s ..` again as long as the docker container exists.
+You can run `./build-sunshine.sh -p -s ..` again as long as the docker container exists.
 
 ```
 git pull
-./build-sunshine -p -s ..
+./build-sunshine.sh -p -s ..
 ```
 
 Optionally, the docker container can be removed after you're finished:
