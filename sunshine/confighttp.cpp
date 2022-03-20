@@ -283,6 +283,10 @@ void saveApp(resp_https_t response, req_https_t request) {
       inputTree.erase("detached");
     }
 
+    if(inputTree.get_child("disconnect-cmd").empty()) {
+      inputTree.erase("disconnect-cmd");
+    }
+
     auto &apps_node = fileTree.get_child("apps"s);
     int index       = inputTree.get<int>("index");
 
