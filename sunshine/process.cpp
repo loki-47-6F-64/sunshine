@@ -143,6 +143,11 @@ int proc_t::running() {
 
 void proc_t::terminate() {
   std::error_code ec;
+  _app_id    = app_id;
+  auto &proc = _apps[app_id];
+  
+  _undo_begin = std::begin(proc.disconnect_cmds);
+  _undo_it    = _undo_begin;
 
   // Ensure child process is terminated
   placebo = false;
@@ -178,7 +183,22 @@ void proc_t::terminate() {
       std::abort();
     }
   }
+for(; _undo_it != std::end(proc.disconnect_cmds); ++_undo_it) {
+    auto &cmd = _undo_it->do_cmd;
 
+    BOOST_LOG(info) << "Executing: ["sv << cmd << ']';
+    auto ret = exe(cmd, _env, _pipe, ec);
+
+    if(ec) {
+      BOOST_LOG(error) << "Couldn't run ["sv << cmd << "]: System: "sv << ec.message();
+      return -1;
+    }
+
+    if(ret != 0) {
+      BOOST_LOG(error) << '[' << cmd << "] failed with code ["sv << ret << ']';
+      return -1;
+    }
+  }
   _pipe.reset();
 }
 
@@ -275,6 +295,7 @@ std::optional<proc::proc_t> parse(const std::string &file_name) {
       proc::ctx_t ctx;
 
       auto prep_nodes_opt     = app_node.get_child_optional("prep-cmd"s);
+      auto disconnect_nodes_opt     = app_node.get_child_optional("disconnect-cmd"s);
       auto detached_nodes_opt = app_node.get_child_optional("detached"s);
       auto output             = app_node.get_optional<std::string>("output"s);
       auto name               = parse_env_val(this_env, app_node.get<std::string>("name"s));
@@ -295,6 +316,24 @@ std::optional<proc::proc_t> parse(const std::string &file_name) {
           }
           else {
             prep_cmds.emplace_back(std::move(do_cmd));
+          }
+        }
+      }
+      
+      std::vector<proc::cmd_t> disconnect_cmds;
+      if(disconnect_nodes_opt) {
+        auto &disconnect_nodes = *disconnect_nodes_opt;
+
+        disconnect_cmds.reserve(disconnect_nodes.size());
+        for(auto &[_, disconnect_node] : disconnect_nodes) {
+          auto do_cmd   = parse_env_val(this_env, disconnect_node.get<std::string>("do"s));
+          auto undo_cmd = disconnect_node.get_optional<std::string>("undo"s);
+
+          if(undo_cmd) {
+            disconnect_cmds.emplace_back(std::move(do_cmd), parse_env_val(this_env, *undo_cmd));
+          }
+          else {
+            disconnect_cmds.emplace_back(std::move(do_cmd));
           }
         }
       }
@@ -323,7 +362,9 @@ std::optional<proc::proc_t> parse(const std::string &file_name) {
 
       ctx.name      = std::move(name);
       ctx.prep_cmds = std::move(prep_cmds);
+      ctx.disconnect_cmds = std::move(disconnect_cmds)
       ctx.detached  = std::move(detached);
+
 
       apps.emplace_back(std::move(ctx));
     }
