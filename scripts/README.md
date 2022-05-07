@@ -20,6 +20,7 @@ sudo apt install docker
 You'll require one of the following Dockerfiles:
 * Dockerfile-2004 --> Ubuntu 20.04
 * Dockerfile-2104 --> Ubuntu 21.04
+* Dockerfile-2204 --> Ubuntu 22.04
 * Dockerfile-debian --> Debian Bullseye
 
 Depending on your system, the build-* scripts may need root privilleges
@@ -32,13 +33,13 @@ cd scripts
 
 Then, the sources will be compiled and the debian package generated:
 ```
-./build-sunshine -p -s ..
+./build-sunshine.sh -p -s ..
 ```
-You can run `build-sunshine -p -s ..` again as long as the docker container exists.
+You can run `build-sunshine.sh -p -s ..` again as long as the docker container exists.
 
 ```
 git pull
-./build-sunshine -p -s ..
+./build-sunshine.sh -p -s ..
 ```
 
 Optionally, the docker container can be removed after you're finished:
