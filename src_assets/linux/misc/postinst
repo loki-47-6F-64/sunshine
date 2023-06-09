@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# Ensure Sunshine can grab images from KMS
+path_to_setcap=$(which setcap)
+if [ -x "$path_to_setcap" ] ; then
+  echo "$path_to_setcap cap_sys_admin+p /usr/bin/sunshine"
+	$path_to_setcap cap_sys_admin+p $(readlink -f /usr/bin/sunshine)
+fi

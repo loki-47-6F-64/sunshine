@@ -8,3 +8,11 @@ cmake-build*
 
 .cache
 .idea
+
+# npm
+node_modules/
+package-lock.json
+
+# Translations
+*.mo
+*.pot

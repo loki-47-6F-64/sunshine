@@ -1,0 +1,18 @@
+{
+  "env": {
+    "PATH": "$(PATH);$(ProgramFiles(x86))\\Steam"
+  },
+  "apps": [
+    {
+      "name": "Desktop",
+      "image-path": "desktop.png"
+    },
+    {
+      "name": "Steam Big Picture",
+      "detached": [
+        "steam steam://open/bigpicture"
+      ],
+      "image-path": "steam.png"
+    }
+  ]
+}

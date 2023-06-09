@@ -1,0 +1,180 @@
+---
+name: Bug Report
+description: Create a bug report to help us improve.
+body:
+  - type: markdown
+    attributes:
+      value: >
+        **THIS IS NOT THE PLACE TO ASK FOR SUPPORT!**
+        Please use our [Support Center](https://app.lizardbyte.dev/support) for support issues.
+        Non actionable bug reports will be locked and closed!
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if an issue already exists for the bug you encountered.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Is your issue described in the documentation?
+      description: Please read our [documentation](https://docs.lizardbyte.dev/projects/sunshine)
+      options:
+        - label: I have read the documentation
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Is your issue present in the nightly release?
+      description: Please test the [nightly](https://github.com/LizardByte/Sunshine/releases/tag/nightly-dev) release
+      options:
+        - label: This issue is present in the nightly release
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the bug here.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Host Operating System
+      description: What version operating system are you running the software on?
+      options:
+        - Docker
+        - Linux
+        - macOS
+        - Windows
+        - other, n/a
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating System Version
+      description: Provide the version of the operating system. Additionally a build number would be helpful.
+    validations:
+      required: true
+  - type: dropdown
+    id: os-architecture
+    attributes:
+      label: Architecture
+      options:
+        - 32 bit
+        - 64 bit
+        - arm
+        - other, n/a
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Sunshine commit or version
+      placeholder: eg. 0.18.0
+    validations:
+      required: true
+  - type: dropdown
+    id: package_type
+    attributes:
+      label: Package
+      description: The package you installed
+      options:
+        - Linux - AppImage
+        - Linux - AUR (Third Party)
+        - Linux - deb
+        - Linux - Docker
+        - Linux - flatpak
+        - Linux - nixpkgs (Third Party)
+        - Linux - PKGBUILD
+        - Linux - pkg.tar.zst
+        - Linux - rpm
+        - Linux - solus (Third Party)
+        - macOS - dmg
+        - macOS - Portfile
+        - Windows - Chocolatey (Third Party)
+        - Windows - installer
+        - Windows - portable
+        - Windows - Scoop (Third Party)
+        - Windows - Winget (Third Party)
+        - other (not listed)
+        - other (self built)
+        - other (fork of this repo)
+        - n/a
+    validations:
+      required: true
+  - type: dropdown
+    id: graphics_type
+    attributes:
+      label: GPU Type
+      description: The type of the installed graphics card.
+      options:
+        - AMD
+        - Intel
+        - Nvidia
+        - none (software encoding)
+        - n/a
+    validations:
+      required: true
+  - type: input
+    id: graphics_model
+    attributes:
+      label: GPU Model
+      description: The model of the installed graphics card.
+      placeholder: e.g. GeForce RTX 2080 SUPER
+    validations:
+      required: true
+  - type: input
+    id: graphics_driver
+    attributes:
+      label: GPU Driver/Mesa Version
+      description: The driver/mesa version of the installed graphics card.
+      placeholder: e.g. 497.29
+    validations:
+      required: true
+  - type: input
+    id: capture_method
+    attributes:
+      label: Capture Method (Linux Only)
+      description: If on Linux, the capture method being used.
+      placeholder: e.g. PipeWire/KVM/X11/KMS
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: |
+        Please copy and paste your config (`sunshine.conf`) file.
+      render: Shell
+    validations:
+      required: true
+  - type: textarea
+    id: apps
+    attributes:
+      label: Apps
+      description: |
+        If this is an issue with launching a game or app, please copy and paste your `apps.json` file.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Please copy and paste any relevant log output. This will be automatically formatted into code,
+        so no need for backticks.
+      render: shell
+    validations:
+      required: true
